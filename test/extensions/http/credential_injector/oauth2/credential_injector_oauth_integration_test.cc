@@ -1,4 +1,6 @@
 #include "source/extensions/http/injected_credentials/oauth2/oauth_response.pb.h"
+#include "envoy/extensions/filters/http/upstream_codec/v3/upstream_codec.pb.h"
+#include "envoy/extensions/filters/network/http_connection_manager/v3/http_connection_manager.pb.h"
 
 #include "test/integration/http_protocol_integration.h"
 #include "test/test_common/utility.h"
@@ -147,6 +149,254 @@ resources:
 
 INSTANTIATE_TEST_SUITE_P(IpVersionsAndGrpcTypes, CredentialInjectorIntegrationTest,
                          GRPC_CLIENT_INTEGRATION_PARAMS);
+
+// ============================================================================
+// Upstream Filter Tests
+// ============================================================================
+
+using HttpFilterProto =
+    envoy::extensions::filters::network::http_connection_manager::v3::HttpFilter;
+
+class CredentialInjectorUpstreamIntegrationTest : public HttpProtocolIntegrationTest {
+public:
+  void addUpstreamHttpFilter(const std::string& filter_config_yaml) {
+    config_helper_.addConfigModifier(
+        [filter_config_yaml](envoy::config::bootstrap::v3::Bootstrap& bootstrap) {
+          // Parse the filter config from YAML
+          HttpFilterProto filter_config;
+          TestUtility::loadFromYaml(filter_config_yaml, filter_config);
+
+          // Get the first cluster (the main upstream cluster)
+          auto* cluster = bootstrap.mutable_static_resources()->mutable_clusters(0);
+
+          // Get or create the HttpProtocolOptions
+          ConfigHelper::HttpProtocolOptions protocol_options;
+          auto it = cluster->typed_extension_protocol_options().find(
+              "envoy.extensions.upstreams.http.v3.HttpProtocolOptions");
+          if (it != cluster->typed_extension_protocol_options().end()) {
+            MessageUtil::anyConvert<ConfigHelper::HttpProtocolOptions>(it->second)
+                .Swap(&protocol_options);
+          } else {
+            // Set up HTTP2 if not already configured
+            protocol_options.mutable_explicit_http_config()->mutable_http2_protocol_options();
+          }
+
+          // Add the filter to the upstream HTTP filters
+          *protocol_options.add_http_filters() = filter_config;
+
+          // Add the upstream codec filter as the terminal filter (required by Envoy)
+          HttpFilterProto codec_filter;
+          codec_filter.set_name("envoy.filters.http.upstream_codec");
+          auto codec_config =
+              envoy::extensions::filters::http::upstream_codec::v3::UpstreamCodec();
+          codec_filter.mutable_typed_config()->PackFrom(codec_config);
+          *protocol_options.add_http_filters() = codec_filter;
+
+          // Pack it back into the cluster config
+          (*cluster->mutable_typed_extension_protocol_options())
+              ["envoy.extensions.upstreams.http.v3.HttpProtocolOptions"]
+                  .PackFrom(protocol_options);
+        });
+  }
+
+  void initializeFilter(const std::string& filter_config) {
+    // Configure as upstream filter on the first cluster
+    addUpstreamHttpFilter(TestEnvironment::substitute(filter_config));
+
+    // Add the OAuth cluster.
+    config_helper_.addConfigModifier([&](envoy::config::bootstrap::v3::Bootstrap& bootstrap) {
+      auto oauth_cluster = config_helper_.buildStaticCluster("oauth", 0, "127.0.0.1");
+      *bootstrap.mutable_static_resources()->add_clusters() = oauth_cluster;
+    });
+
+    initialize();
+  }
+
+  void createUpstreams() override {
+    // backend server
+    addFakeUpstream(Http::CodecType::HTTP1);
+
+    // oauth2 server
+    addFakeUpstream(Http::CodecType::HTTP2);
+  }
+
+  void getFakeOuth2Connection() {
+    AssertionResult result =
+        fake_upstreams_.back()->waitForHttpConnection(*dispatcher_, fake_oauth2_connection_);
+    RELEASE_ASSERT(result, result.message());
+  }
+
+  void acceptNewStream() {
+    AssertionResult result =
+        fake_oauth2_connection_->waitForNewStream(*dispatcher_, oauth2_request_);
+    RELEASE_ASSERT(result, result.message());
+    result = oauth2_request_->waitForEndStream(*dispatcher_);
+    RELEASE_ASSERT(result, result.message());
+    ASSERT_TRUE(oauth2_request_->waitForHeadersComplete());
+  }
+
+  void handleOauth2TokenRequest(absl::string_view client_secret, bool success = true) {
+    AssertionResult result =
+        fake_oauth2_connection_->waitForNewStream(*dispatcher_, oauth2_request_);
+    RELEASE_ASSERT(result, result.message());
+    result = oauth2_request_->waitForEndStream(*dispatcher_);
+    RELEASE_ASSERT(result, result.message());
+    ASSERT_TRUE(oauth2_request_->waitForHeadersComplete());
+
+    // Check that the secret is present in the request body
+    std::string request_body = oauth2_request_->body().toString();
+    const auto query_parameters =
+        Http::Utility::QueryParamsMulti::parseParameters(request_body, 0, true);
+    auto secret = query_parameters.getFirstValue("client_secret");
+    ASSERT_TRUE(secret.has_value());
+    EXPECT_EQ(secret.value(), client_secret);
+
+    if (success) {
+      oauth2_request_->encodeHeaders(
+          Http::TestResponseHeaderMapImpl{{":status", "200"},
+                                          {"content-type", "application/json"}},
+          false);
+      envoy::extensions::http::injected_credentials::oauth2::OAuthResponse oauth_response;
+      oauth_response.mutable_access_token()->set_value("test-access-token");
+      oauth_response.mutable_expires_in()->set_value(20);
+      Buffer::OwnedImpl buffer(
+          MessageUtil::getJsonStringFromMessageOrError(oauth_response));
+      oauth2_request_->encodeData(buffer, true);
+    } else {
+      oauth2_request_->encodeHeaders(Http::TestResponseHeaderMapImpl{{":status", "503"}}, true);
+    }
+  }
+
+  FakeHttpConnectionPtr fake_oauth2_connection_{};
+  FakeStreamPtr oauth2_request_{};
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    Protocols, CredentialInjectorUpstreamIntegrationTest,
+    testing::ValuesIn(HttpProtocolIntegrationTest::getProtocolTestParamsWithoutHTTP3()),
+    HttpProtocolIntegrationTest::protocolTestParamsToString);
+
+// Inject credential to a request without credential using upstream filter (static secret)
+TEST_P(CredentialInjectorUpstreamIntegrationTest, InjectCredentialUpstreamFilter) {
+  const std::string filter_config = R"EOF(
+name: envoy.filters.http.credential_injector
+typed_config:
+  "@type": type.googleapis.com/envoy.extensions.filters.http.credential_injector.v3.CredentialInjector
+  overwrite: false
+  credential:
+    name: envoy.http.injected_credentials.oauth2
+    typed_config:
+      "@type": type.googleapis.com/envoy.extensions.http.injected_credentials.oauth2.v3.OAuth2
+      token_endpoint:
+        cluster: oauth
+        timeout: 3s
+        uri: "oauth.com/token"
+      client_credentials:
+        client_id: test_client_id
+        client_secret:
+          name: test-client-secret
+)EOF";
+
+  // Add a static secret
+  config_helper_.addConfigModifier([](envoy::config::bootstrap::v3::Bootstrap& bootstrap) {
+    auto* secret = bootstrap.mutable_static_resources()->add_secrets();
+    secret->set_name("test-client-secret");
+    auto* generic = secret->mutable_generic_secret();
+    generic->mutable_secret()->set_inline_string("test_client_secret");
+  });
+
+  on_server_init_function_ = [this]() {
+    getFakeOuth2Connection();
+    handleOauth2TokenRequest("test_client_secret");
+  };
+
+  initializeFilter(filter_config);
+
+  // Wait for fetch under upstream stats prefix
+  test_server_->waitForCounterEq(
+      "cluster.cluster_0credential_injector.oauth2.token_fetched", 1,
+      std::chrono::milliseconds(5000));
+
+  codec_client_ = makeHttpConnection(lookupPort("http"));
+  auto response = codec_client_->makeHeaderOnlyRequest(default_request_headers_);
+
+  waitForNextUpstreamRequest();
+
+  EXPECT_EQ("Bearer test-access-token", upstream_request_->headers()
+                                            .get(Http::LowerCaseString("Authorization"))[0]
+                                            ->value()
+                                            .getStringView());
+
+  upstream_request_->encodeHeaders(Http::TestResponseHeaderMapImpl{{":status", "200"}}, true);
+  ASSERT_TRUE(response->waitForEndStream());
+  ASSERT_TRUE(response->complete());
+  EXPECT_EQ("200", response->headers().getStatusValue());
+}
+
+// Token server unavailable followed by retry using upstream filter
+TEST_P(CredentialInjectorUpstreamIntegrationTest, TokenServerUnavailableUpstreamFilter) {
+  const std::string filter_config = R"EOF(
+name: envoy.filters.http.credential_injector
+typed_config:
+  "@type": type.googleapis.com/envoy.extensions.filters.http.credential_injector.v3.CredentialInjector
+  overwrite: false
+  credential:
+    name: envoy.http.injected_credentials.oauth2
+    typed_config:
+      "@type": type.googleapis.com/envoy.extensions.http.injected_credentials.oauth2.v3.OAuth2
+      token_fetch_retry_interval: 0.2s
+      token_endpoint:
+        cluster: oauth
+        timeout: 0.2s
+        uri: "oauth.com/token"
+      client_credentials:
+        client_id: test_client_id
+        client_secret:
+          name: test-client-secret
+)EOF";
+
+  // Add a static secret
+  config_helper_.addConfigModifier([](envoy::config::bootstrap::v3::Bootstrap& bootstrap) {
+    auto* secret = bootstrap.mutable_static_resources()->add_secrets();
+    secret->set_name("test-client-secret");
+    auto* generic = secret->mutable_generic_secret();
+    generic->mutable_secret()->set_inline_string("test_client_secret");
+  });
+
+  on_server_init_function_ = [this]() {
+    getFakeOuth2Connection();
+    // First attempt: 503
+    handleOauth2TokenRequest("test_client_secret", /*success=*/false);
+  };
+
+  initializeFilter(filter_config);
+
+  // Expect bad response counter under upstream stats prefix
+  test_server_->waitForCounterEq(
+      "cluster.cluster_0credential_injector.oauth2.token_fetch_failed_on_bad_response_code", 1,
+      std::chrono::milliseconds(5000));
+
+  // Next attempt should succeed
+  handleOauth2TokenRequest("test_client_secret", /*success=*/true);
+  test_server_->waitForCounterEq(
+      "cluster.cluster_0credential_injector.oauth2.token_fetched", 1,
+      std::chrono::milliseconds(5000));
+
+  codec_client_ = makeHttpConnection(lookupPort("http"));
+  auto response = codec_client_->makeHeaderOnlyRequest(default_request_headers_);
+
+  waitForNextUpstreamRequest();
+
+  EXPECT_EQ("Bearer test-access-token", upstream_request_->headers()
+                                            .get(Http::LowerCaseString("Authorization"))[0]
+                                            ->value()
+                                            .getStringView());
+
+  upstream_request_->encodeHeaders(Http::TestResponseHeaderMapImpl{{":status", "200"}}, true);
+  ASSERT_TRUE(response->waitForEndStream());
+  ASSERT_TRUE(response->complete());
+  EXPECT_EQ("200", response->headers().getStatusValue());
+}
 
 // Inject credential to a request without credential
 TEST_P(CredentialInjectorIntegrationTest, InjectCredentialStaticSecret) {

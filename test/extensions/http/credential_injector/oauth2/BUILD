@@ -47,7 +47,11 @@ envoy_extension_cc_test(
         "//source/extensions/filters/http/credential_injector:config",
         "//source/extensions/http/injected_credentials/oauth2:config",
         "//source/extensions/http/injected_credentials/oauth2:oauth_response_cc_proto",
+        "//source/common/common:fmt_lib",
+        "//source/common/router:upstream_codec_filter_lib",
         "//test/integration:http_protocol_integration_lib",
         "//test/test_common:utility_lib",
+        "@envoy_api//envoy/extensions/filters/http/upstream_codec/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/filters/network/http_connection_manager/v3:pkg_cc_proto",
     ],
 )
