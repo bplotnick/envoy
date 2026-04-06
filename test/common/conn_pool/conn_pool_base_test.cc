@@ -734,5 +734,66 @@ TEST_F(ConnPoolImplDispatcherBaseTest, MaxActiveRequestsOverflowLegacy) {
   closeStreamAndDrainClient();
 }
 
+// Regression test: when a busy client has very negative unused capacity (from an HTTP/2
+// SETTINGS frame reducing MAX_CONCURRENT_STREAMS below the active stream count), the ENVOY_BUG
+// in assertCapacityCountsAreCorrect() fires even though the capacity tracking is correct.
+// The assertion assumes connected capacity (ready + busy) is always > 0 when ready clients
+// exist, but negative busy client capacity can legitimately make the sum <= 0.
+TEST_F(ConnPoolImplBaseTest, NegativeBusyCapacityTriggersEnvoyBugWithReadyClient) {
+  // Use multiplexed streams to simulate HTTP/2 behavior.
+  concurrent_streams_ = 10;
+
+  // Allow any number of client creations and pool ready callbacks since preconnect
+  // logic may trigger additional connections.
+  EXPECT_CALL(pool_, instantiateActiveClient).Times(AnyNumber());
+  EXPECT_CALL(pool_, onPoolReady(_, _)).Times(AnyNumber());
+
+  // Create Client A: connect and attach 5 streams.
+  pool_.newStreamImpl(context_, false); // creates Client A (Connecting) + pending stream
+  clients_[0]->onEvent(Network::ConnectionEvent::Connected); // Ready, dispatches pending stream
+  // Client A: 1 active, capacity = 9.
+
+  // Attach 4 more streams to Client A.
+  for (int i = 0; i < 4; i++) {
+    pool_.newStreamImpl(context_, false);
+  }
+  // Client A: 5 active, capacity = 5.
+  EXPECT_EQ(5, clients_[0]->active_streams_);
+  EXPECT_EQ(ActiveClient::State::Ready, clients_[0]->state());
+
+  // Simulate an HTTP/2 SETTINGS frame reducing MAX_CONCURRENT_STREAMS to 1 on Client A.
+  // This mirrors what MultiplexedActiveClientBase::onSettings() does.
+  int64_t old_unused = clients_[0]->currentUnusedCapacity(); // min(remaining, 10-5) = 5
+  clients_[0]->concurrent_stream_limit_ = 1;
+  int64_t new_unused = clients_[0]->currentUnusedCapacity(); // min(remaining, 1-5) = -4
+  int64_t delta = old_unused - new_unused;                   // 5 - (-4) = 9
+  EXPECT_EQ(9, delta);
+  pool_.decrClusterStreamCapacity(delta);
+
+  // Client A now has negative capacity, transition to Busy.
+  pool_.transitionActiveClientState(*clients_[0], ActiveClient::State::Busy);
+  EXPECT_EQ(ActiveClient::State::Busy, clients_[0]->state());
+
+  // Create Client B with a small concurrent stream limit. When it connects, the
+  // assertCapacityCountsAreCorrect() at the end of onConnectionEvent will fire the ENVOY_BUG
+  // because connected capacity (ready + busy) = client_B_unused + client_A_unused < 0.
+  concurrent_streams_ = 3;
+  pool_.newStreamImpl(context_, false); // creates Client B (Connecting) + pending stream
+  size_t client_b_idx = clients_.size() - 1;
+  // Connecting Client B triggers assertCapacityCountsAreCorrect() which fires the ENVOY_BUG.
+  EXPECT_ENVOY_BUG(clients_[client_b_idx]->onEvent(Network::ConnectionEvent::Connected),
+                   "connecting_and_connected_stream_capacity_");
+
+  // Clean up: close active streams on Client A, then destroy all connections.
+  // In EXPECT_DEBUG_DEATH mode, the Connected event only ran in the subprocess,
+  // so in the main process Client B is still connecting.
+  while (clients_[0]->active_streams_ > 0) {
+    --clients_[0]->active_streams_;
+    pool_.onStreamClosed(*clients_[0], false);
+  }
+  EXPECT_CALL(pool_, onPoolFailure(_, _, _, _)).Times(AnyNumber());
+  pool_.destructAllConnections();
+}
+
 } // namespace ConnectionPool
 } // namespace Envoy
