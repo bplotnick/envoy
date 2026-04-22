@@ -795,5 +795,52 @@ TEST_F(ConnPoolImplBaseTest, NegativeBusyCapacityTriggersEnvoyBugWithReadyClient
   pool_.destructAllConnections();
 }
 
+// Regression test: when a connection closes while currentUnusedCapacity() is negative
+// (after an HTTP/2 SETTINGS frame reduced MAX_CONCURRENT_STREAMS below the active stream count),
+// the close path at conn_pool_base.cc:562 passes the negative int64_t to
+// decrConnectingAndConnectedStreamCapacity(uint32_t). The implicit narrowing conversion wraps
+// (e.g., -4 becomes 4294967292), causing connecting_and_connected_stream_capacity_ to underflow
+// by ~4 billion. This permanently corrupts pool capacity tracking.
+TEST_F(ConnPoolImplBaseTest, ConnectionCloseWithNegativeCapacityCorruptsTracking) {
+  concurrent_streams_ = 10;
+
+  EXPECT_CALL(pool_, instantiateActiveClient).Times(AnyNumber());
+  EXPECT_CALL(pool_, onPoolReady(_, _)).Times(AnyNumber());
+  EXPECT_CALL(pool_, onPoolFailure(_, _, _, _)).Times(AnyNumber());
+
+  // Create Client A, connect, attach 5 streams.
+  pool_.newStreamImpl(context_, false);
+  clients_[0]->onEvent(Network::ConnectionEvent::Connected);
+  for (int i = 0; i < 4; i++) {
+    pool_.newStreamImpl(context_, false);
+  }
+  EXPECT_EQ(5, clients_[0]->active_streams_);
+
+  // Simulate SETTINGS reducing MAX_CONCURRENT_STREAMS to 1.
+  // currentUnusedCapacity() goes from 5 to -4.
+  int64_t old_unused = clients_[0]->currentUnusedCapacity();
+  clients_[0]->concurrent_stream_limit_ = 1;
+  int64_t new_unused = clients_[0]->currentUnusedCapacity();
+  EXPECT_EQ(-4, new_unused);
+  pool_.decrClusterStreamCapacity(old_unused - new_unused);
+  pool_.transitionActiveClientState(*clients_[0], ActiveClient::State::Busy);
+  CHECK_STATE(5 /*active*/, 0 /*pending*/, -4 /*capacity*/);
+
+  // Close the connection while currentUnusedCapacity() is -4.
+  // At conn_pool_base.cc:562: decrConnectingAndConnectedStreamCapacity(uint32_t(-4)) wraps to
+  // 4294967292, subtracting that from the int64_t capacity counter.
+  // The debug SLOW_ASSERT in assertCapacityCountsAreCorrect() catches the resulting mismatch
+  // between the corrupted counter and the actual sum of client unused capacities.
+  EXPECT_ENVOY_BUG(clients_[0]->onEvent(Network::ConnectionEvent::LocalClose), "assert failure");
+
+  // Clean up: EXPECT_ENVOY_BUG ran the close in a subprocess only, so in the main process
+  // Client A is still busy with active streams. Close streams then destroy all connections.
+  while (clients_[0]->active_streams_ > 0) {
+    --clients_[0]->active_streams_;
+    pool_.onStreamClosed(*clients_[0], false);
+  }
+  pool_.destructAllConnections();
+}
+
 } // namespace ConnectionPool
 } // namespace Envoy
