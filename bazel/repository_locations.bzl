@@ -553,8 +553,8 @@ REPOSITORY_LOCATIONS_SPEC = dict(
         urls = ["https://github.com/simdutf/simdutf/releases/download/v{version}/singleheader.zip"],
     ),
     quiche = dict(
-        version = "e68fe05e70da74a3ea282d927c76f76b4bc4e710",
-        sha256 = "08033a0886b470d4ea836a6b785ef6ef7d638265e5523a37718cdd6d1ef6a409",
+        version = "13384c955f76e3a2b157f7b613ce6c02d594770f",
+        sha256 = "a2310cab30a46e9ccf533cd10632d44852d46784f4192e202cc53b6e353d5876",
         urls = ["https://github.com/google/quiche/archive/{version}.tar.gz"],
         strip_prefix = "quiche-{version}",
     ),
@@ -730,6 +730,24 @@ REPOSITORY_LOCATIONS_SPEC = dict(
         sha256 = "c958a1fe1b361391db163a485e21f5f228142d6f8b584f6bef89b26f66dc5b23",
         strip_prefix = "go",
         urls = ["https://dl.google.com/go/go{version}.linux-arm64.tar.gz"],
+    ),
+    fips_clang_ppc64le = dict(
+        version = "14.0.0",
+        sha256 = "2d504c4920885c86b306358846178bc2232dfac83b47c3b1d05861a8162980e6",
+        strip_prefix = "clang+llvm-{version}-powerpc64le-linux-ubuntu-18.04",
+        urls = ["https://github.com/llvm/llvm-project/releases/download/llvmorg-{version}/clang+llvm-{version}-powerpc64le-linux-ubuntu-18.04.tar.xz"],
+    ),
+    fips_go_ppc64le = dict(
+        version = "1.26.2",
+        sha256 = "62b7645dd2404052535617c59e91cf03c7aa28e332dbaddbe4c0d7de7bcc6736",
+        strip_prefix = "go",
+        urls = ["https://dl.google.com/go/go{version}.linux-ppc64le.tar.gz"],
+    ),
+    fips_cmake_src = dict(
+        version = "4.3.2",
+        sha256 = "b0231eb39b3c3cabdc568c619df78208a7bd95ea10c9b2236d61218bac1b367d",
+        strip_prefix = "cmake-{version}",
+        urls = ["https://github.com/Kitware/CMake/releases/download/v{version}/cmake-{version}.tar.gz"],
     ),
 )
 
