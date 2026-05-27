@@ -1150,6 +1150,18 @@ ClusterInfoImpl::ClusterInfoImpl(
           config.preconnect_policy(), per_upstream_preconnect_ratio, 1.0)),
       peekahead_ratio_(PROTOBUF_GET_WRAPPED_OR_DEFAULT(config.preconnect_policy(),
                                                        predictive_preconnect_ratio, 0)),
+      eager_connection_establishment_enabled_(config.has_eager_connection_establishment() &&
+                                              config.eager_connection_establishment().enabled()),
+      eager_connection_max_concurrent_priming_(
+          config.has_eager_connection_establishment()
+              ? PROTOBUF_GET_WRAPPED_OR_DEFAULT(config.eager_connection_establishment(),
+                                                max_concurrent_priming, 10)
+              : 10),
+      eager_connection_prefer_ready_hosts_(
+          config.has_eager_connection_establishment()
+              ? PROTOBUF_GET_WRAPPED_OR_DEFAULT(config.eager_connection_establishment(),
+                                                prefer_ready_hosts, true)
+              : true),
       socket_matcher_(std::move(socket_matcher)), stats_scope_(std::move(stats_scope)),
       traffic_stats_(generateStats(
           stats_scope_, factory_context.serverFactoryContext().clusterManager().clusterStatNames(),

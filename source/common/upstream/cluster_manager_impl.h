@@ -643,6 +643,15 @@ private:
         drop_category_ = drop_category;
       }
 
+      // Returns true if the given host has at least one ready (established) connection
+      // in any of its connection pools on this worker thread.
+      bool hostHasReadyConnection(const HostConstSharedPtr& host) const;
+
+      // Proactively establishes connections to newly added hosts when eager connection
+      // establishment is enabled. Connections are created asynchronously via deferred
+      // callbacks to avoid blocking the EDS update path.
+      void maybePrimeConnectionsForHosts(const HostVector& hosts_added);
+
     private:
       Http::ConnectionPool::Instance*
       httpConnPoolImpl(HostConstSharedPtr host, ResourcePriority priority,
@@ -672,6 +681,16 @@ private:
       // Stores QUICHE specific objects which live through out the life time of the cluster and can
       // be shared across its hosts.
       Http::PersistentQuicInfoPtr quic_info_;
+
+      // Queue of hosts awaiting connection priming when max_concurrent_priming is reached.
+      // Hosts are dequeued and primed as in-flight priming attempts complete.
+      std::deque<HostConstSharedPtr> eager_priming_queue_;
+      // Number of priming attempts currently in-flight on this worker thread.
+      uint32_t eager_priming_in_flight_{0};
+
+      // Drains the eager priming queue, starting connection attempts for queued hosts
+      // up to the max_concurrent_priming limit.
+      void drainEagerPrimingQueue();
 
       // Expected override host statues. Every bit in the HostStatusSet represent an enum value
       // of envoy::config::core::v3::HealthStatus. The specific correspondence is shown below:

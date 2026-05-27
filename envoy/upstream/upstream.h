@@ -718,6 +718,10 @@ public:
   COUNTER(original_dst_host_invalid)                                                               \
   COUNTER(retry_or_shadow_abandoned)                                                               \
   COUNTER(upstream_cx_close_notify)                                                                \
+  COUNTER(upstream_cx_eager_primed)                                                                \
+  COUNTER(upstream_cx_eager_primed_failed)                                                         \
+  COUNTER(upstream_cx_eager_repicked)                                                              \
+  COUNTER(upstream_cx_eager_reprimed)                                                              \
   COUNTER(upstream_cx_connect_attempts_exceeded)                                                   \
   COUNTER(upstream_cx_connect_fail)                                                                \
   COUNTER(upstream_cx_connect_timeout)                                                             \
@@ -770,6 +774,7 @@ public:
   COUNTER(upstream_rq_tx_reset)                                                                    \
   COUNTER(upstream_http3_broken)                                                                   \
   GAUGE(upstream_cx_active, Accumulate)                                                            \
+  GAUGE(upstream_cx_eager_pending, Accumulate)                                                     \
   GAUGE(upstream_cx_rx_bytes_buffered, Accumulate)                                                 \
   GAUGE(upstream_cx_tx_bytes_buffered, Accumulate)                                                 \
   GAUGE(upstream_rq_active, Accumulate)                                                            \
@@ -1045,6 +1050,23 @@ public:
    * @return how many streams should be anticipated per each current stream.
    */
   virtual float peekaheadRatio() const PURE;
+
+  /**
+   * @return true if eager (async) connection establishment is enabled for this cluster.
+   * When enabled, connections are proactively established to newly discovered hosts
+   * rather than lazily on first request.
+   */
+  virtual bool eagerConnectionEstablishmentEnabled() const PURE;
+
+  /**
+   * @return maximum number of concurrent connection priming attempts per worker thread.
+   */
+  virtual uint32_t eagerConnectionMaxConcurrentPriming() const PURE;
+
+  /**
+   * @return true if the load balancer should prefer hosts with established connections.
+   */
+  virtual bool eagerConnectionPreferReadyHosts() const PURE;
 
   /**
    * @return soft limit on size of the cluster's connections read and write buffers.

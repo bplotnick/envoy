@@ -1514,6 +1514,138 @@ void ClusterManagerImpl::ThreadLocalClusterManagerImpl::ClusterEntry::updateHost
     ENVOY_LOG(debug, "re-creating local LB for TLS cluster {}", name);
     lb_ = lb_factory_->create({priority_set_, parent_.local_priority_set_});
   }
+
+  // Proactively establish connections to newly added hosts if eager connection
+  // establishment is enabled.
+  if (!hosts_added.empty()) {
+    maybePrimeConnectionsForHosts(hosts_added);
+  }
+}
+
+void ClusterManagerImpl::ThreadLocalClusterManagerImpl::ClusterEntry::maybePrimeConnectionsForHosts(
+    const HostVector& hosts_added) {
+  if (!cluster_info_->eagerConnectionEstablishmentEnabled()) {
+    return;
+  }
+
+  const uint32_t max_concurrent = cluster_info_->eagerConnectionMaxConcurrentPriming();
+
+  for (const auto& host : hosts_added) {
+    // Only prime connections to healthy hosts.
+    if (host->coarseHealth() != Host::Health::Healthy) {
+      ENVOY_LOG(trace, "eager connection establishment: skipping unhealthy host {} in cluster {}",
+                host->address()->asString(), cluster_info_->name());
+      continue;
+    }
+
+    if (eager_priming_in_flight_ >= max_concurrent) {
+      // Queue the host for later priming.
+      eager_priming_queue_.push_back(host);
+      cluster_info_->trafficStats()->upstream_cx_eager_pending_.inc();
+      ENVOY_LOG(debug,
+                "eager connection establishment: queued host {} for priming "
+                "(in-flight: {}, max: {}, queue depth: {})",
+                host->address()->asString(), eager_priming_in_flight_, max_concurrent,
+                eager_priming_queue_.size());
+      continue;
+    }
+
+    // Check circuit breaker limits before priming.
+    if (!host->canCreateConnection(ResourcePriority::Default)) {
+      eager_priming_queue_.push_back(host);
+      cluster_info_->trafficStats()->upstream_cx_eager_pending_.inc();
+      ENVOY_LOG(trace,
+                "eager connection establishment: circuit breaker prevents priming "
+                "host {}, queued for later",
+                host->address()->asString());
+      continue;
+    }
+
+    // Prime this host.
+    ++eager_priming_in_flight_;
+    HostConstSharedPtr host_ref = host;
+    parent_.thread_local_dispatcher_.post([this, host_ref]() {
+      if (parent_.destroying_) {
+        --eager_priming_in_flight_;
+        drainEagerPrimingQueue();
+        return;
+      }
+
+      auto* pool = httpConnPoolImpl(host_ref, ResourcePriority::Default, absl::nullopt, nullptr);
+      if (pool != nullptr && pool->maybePreconnect(1.1)) {
+        cluster_info_->trafficStats()->upstream_cx_eager_primed_.inc();
+        ENVOY_LOG(debug,
+                  "eager connection establishment: primed connection to host {} "
+                  "in cluster {}",
+                  host_ref->address()->asString(), cluster_info_->name());
+      } else {
+        cluster_info_->trafficStats()->upstream_cx_eager_primed_failed_.inc();
+        ENVOY_LOG(debug, "eager connection establishment: failed to prime host {} in cluster {}",
+                  host_ref->address()->asString(), cluster_info_->name());
+      }
+
+      --eager_priming_in_flight_;
+      drainEagerPrimingQueue();
+    });
+  }
+}
+
+void ClusterManagerImpl::ThreadLocalClusterManagerImpl::ClusterEntry::drainEagerPrimingQueue() {
+  const uint32_t max_concurrent = cluster_info_->eagerConnectionMaxConcurrentPriming();
+
+  while (!eager_priming_queue_.empty() && eager_priming_in_flight_ < max_concurrent) {
+    HostConstSharedPtr host = eager_priming_queue_.front();
+    eager_priming_queue_.pop_front();
+    cluster_info_->trafficStats()->upstream_cx_eager_pending_.dec();
+
+    // Skip hosts that have become unhealthy since they were queued.
+    if (host->coarseHealth() != Host::Health::Healthy) {
+      continue;
+    }
+
+    // Skip hosts that already have connections (primed by traffic while queued).
+    if (host->stats().cx_active_.value() > 0) {
+      continue;
+    }
+
+    if (!host->canCreateConnection(ResourcePriority::Default)) {
+      // Re-queue if circuit breaker is still tripped.
+      eager_priming_queue_.push_back(host);
+      cluster_info_->trafficStats()->upstream_cx_eager_pending_.inc();
+      break;
+    }
+
+    ++eager_priming_in_flight_;
+    parent_.thread_local_dispatcher_.post([this, host]() {
+      if (parent_.destroying_) {
+        --eager_priming_in_flight_;
+        return;
+      }
+
+      auto* pool = httpConnPoolImpl(host, ResourcePriority::Default, absl::nullopt, nullptr);
+      if (pool != nullptr && pool->maybePreconnect(1.1)) {
+        cluster_info_->trafficStats()->upstream_cx_eager_primed_.inc();
+        ENVOY_LOG(debug, "eager connection establishment: primed queued host {} in cluster {}",
+                  host->address()->asString(), cluster_info_->name());
+      } else {
+        cluster_info_->trafficStats()->upstream_cx_eager_primed_failed_.inc();
+      }
+
+      --eager_priming_in_flight_;
+      drainEagerPrimingQueue();
+    });
+  }
+}
+
+bool ClusterManagerImpl::ThreadLocalClusterManagerImpl::ClusterEntry::hostHasReadyConnection(
+    const HostConstSharedPtr& host) const {
+  // A host has a ready connection if it has at least one active connection (cx_active > 0)
+  // and a connection pool container exists for it on this worker thread.
+  auto* container = parent_.getHttpConnPoolsContainer(host);
+  if (container == nullptr || container->pools_ == nullptr || container->pools_->empty()) {
+    return false;
+  }
+  return host->stats().cx_active_.value() > 0;
 }
 
 void ClusterManagerImpl::ThreadLocalClusterManagerImpl::ClusterEntry::drainConnPools(
@@ -2058,6 +2190,26 @@ void ClusterManagerImpl::ThreadLocalClusterManagerImpl::httpConnPoolIsIdle(
     ENVOY_LOG(trace, "Pool container empty for host {}, erasing host entry", *host);
     host_http_conn_pool_map_.erase(
         host); // NOTE: `container` is erased after this point in the lambda.
+
+    // If eager connection establishment is enabled and the host is still healthy,
+    // re-prime the connection in the background. This handles the case where a
+    // connection is lost (GOAWAY, idle timeout, etc.) and ensures we maintain warm
+    // connections to active hosts — analogous to gRPC subchannel reconnection.
+    if (host->coarseHealth() == Host::Health::Healthy &&
+        host->cluster().eagerConnectionEstablishmentEnabled()) {
+      host->cluster().trafficStats()->upstream_cx_eager_reprimed_.inc();
+      HostConstSharedPtr host_ref = host;
+      thread_local_dispatcher_.post([this, host_ref]() {
+        if (destroying_) {
+          return;
+        }
+        auto it = thread_local_clusters_.find(host_ref->cluster().name());
+        if (it != thread_local_clusters_.end() && it->second) {
+          HostVector hosts_to_prime{std::const_pointer_cast<Host>(host_ref)};
+          it->second->maybePrimeConnectionsForHosts(hosts_to_prime);
+        }
+      });
+    }
   }
 }
 
@@ -2073,6 +2225,33 @@ HostSelectionResponse ClusterManagerImpl::ThreadLocalClusterManagerImpl::Cluster
   if (!override_result.strict) {
     Upstream::HostSelectionResponse host_selection = lb_->chooseHost(context);
     if (host_selection.host || host_selection.cancelable) {
+      // If eager connection establishment is enabled and prefer_ready_hosts is true,
+      // check if the selected host has a ready connection. If not, attempt to find
+      // an alternative host that does have a ready connection.
+      if (host_selection.host != nullptr && cluster_info_->eagerConnectionEstablishmentEnabled() &&
+          cluster_info_->eagerConnectionPreferReadyHosts() &&
+          !hostHasReadyConnection(host_selection.host)) {
+        // Try a limited number of re-picks to find a host with a ready connection.
+        // This avoids O(n) scanning while giving a good chance of finding a ready host.
+        static constexpr uint32_t kMaxRePicks = 3;
+        for (uint32_t i = 0; i < kMaxRePicks; ++i) {
+          auto alt_selection = lb_->chooseHost(context);
+          if (alt_selection.host != nullptr && hostHasReadyConnection(alt_selection.host)) {
+            cluster_info_->trafficStats()->upstream_cx_eager_repicked_.inc();
+            ENVOY_LOG(trace,
+                      "eager connection establishment: re-picked host {} with ready "
+                      "connection (attempt {})",
+                      alt_selection.host->address()->asString(), i + 1);
+            return alt_selection;
+          }
+        }
+        // No host with a ready connection found after re-picks; use original selection
+        // to avoid starvation during cold start.
+        ENVOY_LOG(trace,
+                  "eager connection establishment: no host with ready connection found "
+                  "after {} re-picks, using original selection",
+                  kMaxRePicks);
+      }
       return host_selection;
     }
     cluster_info_->trafficStats()->upstream_cx_none_healthy_.inc();

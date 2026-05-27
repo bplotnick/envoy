@@ -81,6 +81,9 @@ MockClusterInfo::MockClusterInfo()
   ON_CALL(*this, connectTimeout()).WillByDefault(Return(std::chrono::milliseconds(5001)));
   ON_CALL(*this, idleTimeout()).WillByDefault(Return(absl::optional<std::chrono::milliseconds>()));
   ON_CALL(*this, perUpstreamPreconnectRatio()).WillByDefault(Return(1.0));
+  ON_CALL(*this, eagerConnectionEstablishmentEnabled()).WillByDefault(Return(false));
+  ON_CALL(*this, eagerConnectionMaxConcurrentPriming()).WillByDefault(Return(10));
+  ON_CALL(*this, eagerConnectionPreferReadyHosts()).WillByDefault(Return(true));
   ON_CALL(*this, perConnectionBufferHighWatermarkTimeout())
       .WillByDefault(Return(std::chrono::milliseconds(0)));
   ON_CALL(*this, name()).WillByDefault(ReturnRef(name_));

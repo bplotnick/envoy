@@ -46,7 +46,7 @@ message ClusterCollection {
 }
 
 // Configuration for a single upstream cluster.
-// [#next-free-field: 61]
+// [#next-free-field: 62]
 message Cluster {
   option (udpa.annotations.versioning).previous_message_type = "envoy.api.v2.Cluster";
 
@@ -755,6 +755,35 @@ message Cluster {
         [(validate.rules).double = {lte: 3.0 gte: 1.0}];
   }
 
+  // [#not-implemented-hide:]
+  // Configuration for eager (async) connection establishment. When enabled, Envoy will
+  // proactively establish connections to newly discovered upstream hosts (e.g. via EDS)
+  // rather than waiting for the first request. This mirrors the behavior of gRPC clients
+  // which establish connections to all discovered endpoints asynchronously and only route
+  // traffic to endpoints with established ("READY") connections.
+  //
+  // This is particularly beneficial for latency-sensitive gRPC services where the cost of
+  // establishing a new connection (TCP + TLS handshake) on the request path is unacceptable.
+  message EagerConnectionEstablishment {
+    // Whether eager connection establishment is enabled. When true, connections will be
+    // proactively established to newly added healthy hosts, and the load balancer will
+    // prefer hosts with established connections over those still connecting.
+    bool enabled = 1;
+
+    // Maximum number of concurrent connection priming attempts per worker thread.
+    // This limits the burst of connections when many new hosts are discovered at once
+    // (e.g. a large EDS update). Remaining hosts are queued and primed as in-flight
+    // attempts complete. Defaults to 10 if not set.
+    google.protobuf.UInt32Value max_concurrent_priming = 2;
+
+    // Whether to prefer hosts with established connections during load balancing.
+    // When true, the load balancer will first attempt to select from hosts that have
+    // at least one ready connection, falling back to all healthy hosts if none have
+    // established connections (to prevent deadlock during cold start).
+    // Defaults to true.
+    google.protobuf.BoolValue prefer_ready_hosts = 3;
+  }
+
   reserved 12, 15, 7, 11, 35;
 
   reserved "hosts", "tls_context", "extension_protocol_options";
@@ -1303,6 +1332,11 @@ message Cluster {
   // If ``connection_pool_per_downstream_connection`` is true, the cluster will use a separate
   // connection pool for every downstream connection
   bool connection_pool_per_downstream_connection = 51;
+
+  // [#not-implemented-hide:]
+  // Configuration for eager connection establishment. See ``EagerConnectionEstablishment``
+  // for details.
+  EagerConnectionEstablishment eager_connection_establishment = 61;
 }
 
 // Extensible load balancing policy configuration.
