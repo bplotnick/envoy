@@ -718,6 +718,8 @@ public:
   COUNTER(original_dst_host_invalid)                                                               \
   COUNTER(retry_or_shadow_abandoned)                                                               \
   COUNTER(upstream_cx_close_notify)                                                                \
+  COUNTER(upstream_cx_eager_primed)                                                                \
+  COUNTER(upstream_cx_eager_primed_failed)                                                         \
   COUNTER(upstream_cx_connect_attempts_exceeded)                                                   \
   COUNTER(upstream_cx_connect_fail)                                                                \
   COUNTER(upstream_cx_connect_timeout)                                                             \
@@ -770,6 +772,7 @@ public:
   COUNTER(upstream_rq_tx_reset)                                                                    \
   COUNTER(upstream_http3_broken)                                                                   \
   GAUGE(upstream_cx_active, Accumulate)                                                            \
+  GAUGE(upstream_cx_eager_pending, Accumulate)                                                     \
   GAUGE(upstream_cx_rx_bytes_buffered, Accumulate)                                                 \
   GAUGE(upstream_cx_tx_bytes_buffered, Accumulate)                                                 \
   GAUGE(upstream_rq_active, Accumulate)                                                            \
@@ -1045,6 +1048,14 @@ public:
    * @return how many streams should be anticipated per each current stream.
    */
   virtual float peekaheadRatio() const PURE;
+
+  /**
+   * @return minimum number of connections to maintain per upstream host. When non-zero,
+   * Envoy will proactively establish connections so that at least this many open (or
+   * opening) connections exist per host at all times — without waiting for a request.
+   * A value of zero (default) disables the floor; only ratio-based preconnect applies.
+   */
+  virtual uint32_t perUpstreamMinConnections() const PURE;
 
   /**
    * @return soft limit on size of the cluster's connections read and write buffers.

@@ -753,6 +753,25 @@ message Cluster {
     // harm latency more than the preconnecting helps.
     google.protobuf.DoubleValue predictive_preconnect_ratio = 2
         [(validate.rules).double = {lte: 3.0 gte: 1.0}];
+
+    // [#not-implemented-hide:]
+    // Minimum number of connections to maintain per upstream host. When non-zero, Envoy will
+    // proactively establish connections to each healthy host so that at least this many open
+    // (or opening) connections exist at all times — without waiting for a request to arrive.
+    //
+    // This eliminates the connection-establishment latency on the request path that exists
+    // in the default lazy model. It is particularly beneficial for latency-sensitive gRPC
+    // services where a TCP + TLS handshake on first request is unacceptable, and for clusters
+    // where connections cycle frequently (max-connection-duration, GOAWAY, idle timeout) —
+    // each connection close evaluates the floor and re-primes if the host drops below the
+    // configured minimum.
+    //
+    // Conceptually similar to gRPC's ``round_robin`` load balancer, which establishes
+    // connections to all discovered endpoints asynchronously rather than on first RPC.
+    //
+    // When unset or zero (default), no minimum is enforced and only the ratio-based
+    // preconnect settings above apply.
+    google.protobuf.UInt32Value per_upstream_min_connections = 3;
   }
 
   reserved 12, 15, 7, 11, 35;

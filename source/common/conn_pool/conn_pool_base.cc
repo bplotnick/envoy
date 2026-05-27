@@ -122,6 +122,19 @@ bool ConnPoolImplBase::shouldCreateNewConnection(float global_preconnect_ratio) 
     return pending_streams_.size() > connecting_stream_capacity_;
   }
 
+  // Enforce per_upstream_min_connections floor: if a minimum is configured and the
+  // current count of established + in-flight connections is below it, create more.
+  // "Open or opening" semantics — counts ready, busy (saturated), and connecting
+  // clients — so concurrent close events don't drive over-priming.
+  if (const uint32_t min_connections = host_->cluster().perUpstreamMinConnections();
+      min_connections > 0) {
+    const size_t open_or_opening =
+        ready_clients_.size() + busy_clients_.size() + connecting_clients_.size();
+    if (open_or_opening < min_connections) {
+      return true;
+    }
+  }
+
   // Determine if we are trying to prefetch for global preconnect or local preconnect.
   if (global_preconnect_ratio != 0) {
     // If global preconnecting is on, and this connection is within the global
@@ -625,6 +638,14 @@ void ConnPoolImplBase::onConnectionEvent(ActiveClient& client, absl::string_view
     }
 
     dispatcher_.deferredDelete(client.removeFromList(owningList(client.state())));
+
+    // If a per_upstream_min_connections floor is configured and this close dropped
+    // us below it, trigger preconnect to refill. shouldCreateNewConnection now
+    // honors the floor; tryCreateNewConnections invokes it. This makes connection
+    // close itself the maintenance trigger, instead of waiting for the next stream.
+    if (!is_draining_for_deletion_ && host_->cluster().perUpstreamMinConnections() > 0) {
+      tryCreateNewConnections();
+    }
 
     // Check if the pool transitioned to idle state after removing closed client
     // from one of the client tracking lists.

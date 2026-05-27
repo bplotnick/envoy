@@ -643,6 +643,11 @@ private:
         drop_category_ = drop_category;
       }
 
+      // Proactively establishes up to per_upstream_min_connections connections to each
+      // newly added host. Connections are created asynchronously via deferred dispatcher
+      // callbacks to avoid blocking the EDS update path.
+      void maybePrimeConnectionsForHosts(const HostVector& hosts_added);
+
     private:
       Http::ConnectionPool::Instance*
       httpConnPoolImpl(HostConstSharedPtr host, ResourcePriority priority,
@@ -672,6 +677,23 @@ private:
       // Stores QUICHE specific objects which live through out the life time of the cluster and can
       // be shared across its hosts.
       Http::PersistentQuicInfoPtr quic_info_;
+
+      // Queue of hosts awaiting connection priming when max_concurrent_priming is reached.
+      // Hosts are dequeued and primed as in-flight priming attempts complete.
+      std::deque<HostConstSharedPtr> eager_priming_queue_;
+      // Number of priming attempts currently in-flight on this worker thread.
+      uint32_t eager_priming_in_flight_{0};
+      // Timer used to retry draining the priming queue when no in-flight callback
+      // will fire to do so (e.g., the cluster's connection circuit breaker rejected
+      // every candidate so no priming attempt was started).
+      Event::TimerPtr eager_priming_retry_timer_;
+
+      // Drains the eager priming queue, starting connection attempts for queued hosts
+      // up to the max_concurrent_priming limit.
+      void drainEagerPrimingQueue();
+      // Arms or re-arms the retry timer so the queue is re-checked even when no
+      // priming is in flight (covers the circuit-breaker-stalled-queue case).
+      void armEagerPrimingRetryTimer();
 
       // Expected override host statues. Every bit in the HostStatusSet represent an enum value
       // of envoy::config::core::v3::HealthStatus. The specific correspondence is shown below:

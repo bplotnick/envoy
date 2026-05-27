@@ -876,6 +876,7 @@ public:
 
   float perUpstreamPreconnectRatio() const override { return per_upstream_preconnect_ratio_; }
   float peekaheadRatio() const override { return peekahead_ratio_; }
+  uint32_t perUpstreamMinConnections() const override { return per_upstream_min_connections_; }
   uint32_t perConnectionBufferLimitBytes() const override {
     return per_connection_buffer_limit_bytes_;
   }
@@ -1079,6 +1080,7 @@ private:
   OptionalTimeouts optional_timeouts_;
   const float per_upstream_preconnect_ratio_;
   const float peekahead_ratio_;
+  const uint32_t per_upstream_min_connections_;
   TransportSocketMatcherPtr socket_matcher_;
   Stats::ScopeSharedPtr stats_scope_;
   mutable DeferredCreationCompatibleClusterTrafficStats traffic_stats_;

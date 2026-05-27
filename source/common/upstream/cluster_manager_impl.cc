@@ -1514,6 +1514,190 @@ void ClusterManagerImpl::ThreadLocalClusterManagerImpl::ClusterEntry::updateHost
     ENVOY_LOG(debug, "re-creating local LB for TLS cluster {}", name);
     lb_ = lb_factory_->create({priority_set_, parent_.local_priority_set_});
   }
+
+  // If per_upstream_min_connections is configured, proactively establish connections
+  // to newly added hosts up to the configured floor.
+  if (!hosts_added.empty()) {
+    maybePrimeConnectionsForHosts(hosts_added);
+  }
+}
+
+// Per-worker bound on concurrent priming attempts. Limits burst when many hosts are
+// added at once (e.g. a large EDS update). Excess hosts are queued and primed as
+// in-flight attempts complete.
+namespace {
+constexpr uint32_t kMaxConcurrentPriming = 10;
+} // namespace
+
+void ClusterManagerImpl::ThreadLocalClusterManagerImpl::ClusterEntry::maybePrimeConnectionsForHosts(
+    const HostVector& hosts_added) {
+  const uint32_t min_connections = cluster_info_->perUpstreamMinConnections();
+  if (min_connections == 0) {
+    return;
+  }
+
+  for (const auto& host : hosts_added) {
+    // Only prime connections to healthy hosts.
+    if (host->coarseHealth() != Host::Health::Healthy) {
+      ENVOY_LOG(trace, "eager connection establishment: skipping unhealthy host {} in cluster {}",
+                host->address()->asString(), cluster_info_->name());
+      continue;
+    }
+
+    if (eager_priming_in_flight_ >= kMaxConcurrentPriming) {
+      eager_priming_queue_.push_back(host);
+      cluster_info_->trafficStats()->upstream_cx_eager_pending_.inc();
+      ENVOY_LOG(debug, "min_connections priming: queued host {} (in-flight: {}, depth: {})",
+                host->address()->asString(), eager_priming_in_flight_, eager_priming_queue_.size());
+      continue;
+    }
+
+    // Check circuit breaker limits before priming.
+    if (!host->canCreateConnection(ResourcePriority::Default)) {
+      eager_priming_queue_.push_back(host);
+      cluster_info_->trafficStats()->upstream_cx_eager_pending_.inc();
+      ENVOY_LOG(trace, "min_connections priming: circuit breaker blocked host {}, queued",
+                host->address()->asString());
+      // No in-flight priming callback will fire to retry the queue. Arm a retry
+      // timer so the queue gets re-checked when the breaker has capacity again.
+      armEagerPrimingRetryTimer();
+      continue;
+    }
+
+    ++eager_priming_in_flight_;
+    HostConstSharedPtr host_ref = host;
+    // Lifetime safety: capture the cluster name (by value) and the host shared_ptr.
+    // Re-look up the ClusterEntry inside the callback so we never dereference a
+    // destroyed entry if CDS removes the cluster between post and execution.
+    // If the ClusterEntry is gone, the entire eager_priming_* state went with it
+    // — no decrement needed.
+    const std::string cluster_name(cluster_info_->name());
+    parent_.thread_local_dispatcher_.post(
+        [&parent = parent_, cluster_name, host_ref, min_connections]() {
+          if (parent.destroying_) {
+            return;
+          }
+          auto it = parent.thread_local_clusters_.find(cluster_name);
+          if (it == parent.thread_local_clusters_.end() || !it->second) {
+            return;
+          }
+          auto& entry = *it->second;
+
+          auto* pool =
+              entry.httpConnPoolImpl(host_ref, ResourcePriority::Default, absl::nullopt, nullptr);
+          uint32_t opened = 0;
+          if (pool != nullptr) {
+            // Drive the pool to open up to min_connections connections. Each maybePreconnect
+            // call creates at most one; loop until the pool declines or we reach the floor.
+            for (uint32_t i = 0; i < min_connections; ++i) {
+              if (!pool->maybePreconnect(1.1)) {
+                break;
+              }
+              ++opened;
+            }
+          }
+          if (opened > 0) {
+            entry.cluster_info_->trafficStats()->upstream_cx_eager_primed_.add(opened);
+            ENVOY_LOG(debug, "min_connections priming: opened {} connection(s) to host {} in {}",
+                      opened, host_ref->address()->asString(), entry.cluster_info_->name());
+          } else {
+            entry.cluster_info_->trafficStats()->upstream_cx_eager_primed_failed_.inc();
+          }
+
+          --entry.eager_priming_in_flight_;
+          entry.drainEagerPrimingQueue();
+        });
+  }
+}
+
+void ClusterManagerImpl::ThreadLocalClusterManagerImpl::ClusterEntry::drainEagerPrimingQueue() {
+  while (!eager_priming_queue_.empty() && eager_priming_in_flight_ < kMaxConcurrentPriming) {
+    HostConstSharedPtr host = eager_priming_queue_.front();
+    eager_priming_queue_.pop_front();
+    cluster_info_->trafficStats()->upstream_cx_eager_pending_.dec();
+
+    // Skip hosts that have become unhealthy since they were queued.
+    if (host->coarseHealth() != Host::Health::Healthy) {
+      continue;
+    }
+
+    // Skip hosts that already have connections (primed by traffic while queued).
+    if (host->stats().cx_active_.value() > 0) {
+      continue;
+    }
+
+    if (!host->canCreateConnection(ResourcePriority::Default)) {
+      // Re-queue if circuit breaker is still tripped, and arm the retry timer
+      // since no in-flight callback will fire to drain again.
+      eager_priming_queue_.push_back(host);
+      cluster_info_->trafficStats()->upstream_cx_eager_pending_.inc();
+      armEagerPrimingRetryTimer();
+      break;
+    }
+
+    const uint32_t min_connections = cluster_info_->perUpstreamMinConnections();
+    const std::string cluster_name(cluster_info_->name());
+    ++eager_priming_in_flight_;
+    parent_.thread_local_dispatcher_.post([&parent = parent_, cluster_name, host,
+                                           min_connections]() {
+      if (parent.destroying_) {
+        return;
+      }
+      auto it = parent.thread_local_clusters_.find(cluster_name);
+      if (it == parent.thread_local_clusters_.end() || !it->second) {
+        return;
+      }
+      auto& entry = *it->second;
+
+      auto* pool = entry.httpConnPoolImpl(host, ResourcePriority::Default, absl::nullopt, nullptr);
+      uint32_t opened = 0;
+      if (pool != nullptr) {
+        for (uint32_t i = 0; i < min_connections; ++i) {
+          if (!pool->maybePreconnect(1.1)) {
+            break;
+          }
+          ++opened;
+        }
+      }
+      if (opened > 0) {
+        entry.cluster_info_->trafficStats()->upstream_cx_eager_primed_.add(opened);
+        ENVOY_LOG(debug, "min_connections priming: opened {} queued connection(s) to host {}",
+                  opened, host->address()->asString());
+      } else {
+        entry.cluster_info_->trafficStats()->upstream_cx_eager_primed_failed_.inc();
+      }
+
+      --entry.eager_priming_in_flight_;
+      entry.drainEagerPrimingQueue();
+    });
+  }
+}
+
+void ClusterManagerImpl::ThreadLocalClusterManagerImpl::ClusterEntry::armEagerPrimingRetryTimer() {
+  // 250ms retry interval — short enough to recover quickly when a transient
+  // circuit-breaker state clears, long enough to avoid spinning if the breaker
+  // is persistently full. Only one timer is armed at a time; while it's pending
+  // we don't re-arm.
+  static constexpr std::chrono::milliseconds kRetryInterval{250};
+  if (eager_priming_retry_timer_ == nullptr) {
+    const std::string cluster_name(cluster_info_->name());
+    eager_priming_retry_timer_ =
+        parent_.thread_local_dispatcher_.createTimer([&parent = parent_, cluster_name]() {
+          if (parent.destroying_) {
+            return;
+          }
+          auto it = parent.thread_local_clusters_.find(cluster_name);
+          if (it == parent.thread_local_clusters_.end() || !it->second) {
+            return;
+          }
+          it->second->drainEagerPrimingQueue();
+          // If the queue still has entries after draining, drainEagerPrimingQueue
+          // will have re-armed the timer.
+        });
+  }
+  if (!eager_priming_retry_timer_->enabled()) {
+    eager_priming_retry_timer_->enableTimer(kRetryInterval);
+  }
 }
 
 void ClusterManagerImpl::ThreadLocalClusterManagerImpl::ClusterEntry::drainConnPools(
@@ -2058,6 +2242,49 @@ void ClusterManagerImpl::ThreadLocalClusterManagerImpl::httpConnPoolIsIdle(
     ENVOY_LOG(trace, "Pool container empty for host {}, erasing host entry", *host);
     host_http_conn_pool_map_.erase(
         host); // NOTE: `container` is erased after this point in the lambda.
+  }
+
+  // If per_upstream_min_connections is configured and the host is still healthy,
+  // re-prime the host in the background. Handles the case where a pool drains
+  // (transient priming failure, GOAWAY, idle timeout where the pool-internal
+  // refill couldn't recover) and the pool container has been erased.
+  //
+  // Lifetime safety: we capture the cluster name (by value) and the host (as a
+  // shared_ptr), then re-validate inside the callback. This avoids dereferencing
+  // a removed cluster or a stale ClusterEntry if CDS/EDS removed them between
+  // the post and the dispatcher run.
+  if (host->cluster().perUpstreamMinConnections() > 0 &&
+      host->coarseHealth() == Host::Health::Healthy) {
+    const std::string cluster_name(host->cluster().name());
+    HostConstSharedPtr host_ref = host;
+    thread_local_dispatcher_.post([this, cluster_name, host_ref]() {
+      if (destroying_) {
+        return;
+      }
+      auto cluster_it = thread_local_clusters_.find(cluster_name);
+      if (cluster_it == thread_local_clusters_.end() || !cluster_it->second) {
+        // Cluster was removed; nothing to do.
+        return;
+      }
+      // Verify the host is still in the cluster's priority set and still healthy.
+      bool host_still_present = false;
+      for (const auto& host_set : cluster_it->second->prioritySet().hostSetsPerPriority()) {
+        for (const auto& h : host_set->hosts()) {
+          if (h.get() == host_ref.get()) {
+            host_still_present = true;
+            break;
+          }
+        }
+        if (host_still_present) {
+          break;
+        }
+      }
+      if (!host_still_present || host_ref->coarseHealth() != Host::Health::Healthy) {
+        return;
+      }
+      HostVector hosts_to_prime{std::const_pointer_cast<Host>(host_ref)};
+      cluster_it->second->maybePrimeConnectionsForHosts(hosts_to_prime);
+    });
   }
 }
 
