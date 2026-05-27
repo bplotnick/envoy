@@ -96,6 +96,14 @@ public:
   virtual bool hasActiveConnections() const PURE;
 
   /**
+   * @return true if the pool has at least one connection that can accept a new stream without
+   * creating a new connection — i.e. at least one connection exists that is not at its
+   * concurrent-stream limit. Used by connection-aware load balancing to distinguish "host has
+   * a connection" from "host has spare capacity to serve another request right now."
+   */
+  virtual bool hasReadyConnection() const PURE;
+
+  /**
    * Create a new stream on the pool.
    * @param response_decoder supplies the decoder events to fire when the response is
    *                         available.

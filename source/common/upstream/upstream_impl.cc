@@ -1150,6 +1150,8 @@ ClusterInfoImpl::ClusterInfoImpl(
           config.preconnect_policy(), per_upstream_preconnect_ratio, 1.0)),
       peekahead_ratio_(PROTOBUF_GET_WRAPPED_OR_DEFAULT(config.preconnect_policy(),
                                                        predictive_preconnect_ratio, 0)),
+      connection_aware_load_balancing_enabled_(config.has_connection_aware_load_balancing() &&
+                                               config.connection_aware_load_balancing().enabled()),
       socket_matcher_(std::move(socket_matcher)), stats_scope_(std::move(stats_scope)),
       traffic_stats_(generateStats(
           stats_scope_, factory_context.serverFactoryContext().clusterManager().clusterStatNames(),

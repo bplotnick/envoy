@@ -643,7 +643,17 @@ private:
         drop_category_ = drop_category;
       }
 
+      // Returns true if the given host has at least one ready (established) connection
+      // in any of its connection pools on this worker thread.
+      bool hostHasReadyConnection(const HostConstSharedPtr& host) const;
+      bool hostHasReadyConnection(const Host& host) const;
+
     private:
+      // Selects a host while skipping hosts without a ready connection on this worker,
+      // using the load balancer's own host-rejection retry loop. Used when
+      // connection_aware_load_balancing is enabled.
+      HostSelectionResponse chooseHostConnectionAware(LoadBalancerContext* context);
+
       Http::ConnectionPool::Instance*
       httpConnPoolImpl(HostConstSharedPtr host, ResourcePriority priority,
                        absl::optional<Http::Protocol> downstream_protocol,

@@ -46,7 +46,7 @@ message ClusterCollection {
 }
 
 // Configuration for a single upstream cluster.
-// [#next-free-field: 61]
+// [#next-free-field: 62]
 message Cluster {
   option (udpa.annotations.versioning).previous_message_type = "envoy.api.v2.Cluster";
 
@@ -755,6 +755,26 @@ message Cluster {
         [(validate.rules).double = {lte: 3.0 gte: 1.0}];
   }
 
+  // [#not-implemented-hide:]
+  // Configuration for connection-aware load balancing. When enabled, host selection
+  // prefers hosts that already have at least one established upstream connection on
+  // the current worker thread, falling back to the underlying load balancer's choice
+  // if no ready host is found within a small number of re-pick attempts.
+  //
+  // Most useful in combination with ``preconnect_policy.per_upstream_min_connections``
+  // (which proactively opens connections) — connection-aware LB then ensures requests
+  // route preferentially to hosts whose connections are actually READY, closing the
+  // brief race window during which a host may have been chosen but its preconnected
+  // connection is still mid-handshake.
+  //
+  // Note: only meaningful for non-consistent-hash load balancing policies (e.g.
+  // ROUND_ROBIN, LEAST_REQUEST, RANDOM). For consistent-hash policies (RING_HASH,
+  // MAGLEV) re-picks would violate hash affinity, so this setting has no effect.
+  message ConnectionAwareLoadBalancing {
+    // Whether connection-aware load balancing is enabled.
+    bool enabled = 1;
+  }
+
   reserved 12, 15, 7, 11, 35;
 
   reserved "hosts", "tls_context", "extension_protocol_options";
@@ -1303,6 +1323,11 @@ message Cluster {
   // If ``connection_pool_per_downstream_connection`` is true, the cluster will use a separate
   // connection pool for every downstream connection
   bool connection_pool_per_downstream_connection = 51;
+
+  // [#not-implemented-hide:]
+  // Configuration for connection-aware load balancing. See ``ConnectionAwareLoadBalancing``
+  // for details.
+  ConnectionAwareLoadBalancing connection_aware_load_balancing = 61;
 }
 
 // Extensible load balancing policy configuration.

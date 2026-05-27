@@ -111,6 +111,87 @@ bool isBlockingAdsCluster(const envoy::config::bootstrap::v3::Bootstrap& bootstr
   return blocking_ads_cluster;
 }
 
+// Wraps a LoadBalancerContext to add connection-aware host selection: hosts without a
+// ready connection on the current worker are rejected via shouldSelectAnotherHost so the
+// load balancer re-picks (bounded by hostSelectionRetryCount). This reuses the LB base
+// class's existing host-rejection retry loop rather than re-invoking chooseHost from the
+// cluster manager — the LB advances its own state exactly once per attempt and returns
+// the host it lands on. Load balancers that do not honor shouldSelectAnotherHost simply
+// ignore the filter (the feature degrades to a no-op for them).
+//
+// The wrapped context may be null (some chooseHost callers pass no context); in that case
+// the LoadBalancerContextBase defaults apply for everything except the warm-host filter.
+class ConnectionAwareLbContext : public LoadBalancerContextBase {
+public:
+  ConnectionAwareLbContext(LoadBalancerContext* wrapped, std::function<bool(const Host&)> is_warm,
+                           uint32_t retry_budget)
+      : wrapped_(wrapped), is_warm_(std::move(is_warm)), retry_budget_(retry_budget) {}
+
+  // Connection-aware filtering, composed with any predicate the wrapped context carries.
+  // Reject hosts without a ready connection so the LB re-picks; the LB's retry loop is
+  // bounded by hostSelectionRetryCount() and returns the last pick if all are cold.
+  bool shouldSelectAnotherHost(const Host& host) override {
+    if (wrapped_ != nullptr && wrapped_->shouldSelectAnotherHost(host)) {
+      return true;
+    }
+    return !is_warm_(host);
+  }
+
+  uint32_t hostSelectionRetryCount() const override {
+    const uint32_t wrapped_count = wrapped_ != nullptr ? wrapped_->hostSelectionRetryCount() : 0;
+    return std::max(wrapped_count, retry_budget_);
+  }
+
+  // Forward the remaining context surface to the wrapped context when present.
+  absl::optional<uint64_t> computeHashKey() override {
+    return wrapped_ != nullptr ? wrapped_->computeHashKey() : absl::nullopt;
+  }
+  const Router::MetadataMatchCriteria* metadataMatchCriteria() override {
+    return wrapped_ != nullptr ? wrapped_->metadataMatchCriteria() : nullptr;
+  }
+  const Network::Connection* downstreamConnection() const override {
+    return wrapped_ != nullptr ? wrapped_->downstreamConnection() : nullptr;
+  }
+  StreamInfo::StreamInfo* requestStreamInfo() const override {
+    return wrapped_ != nullptr ? wrapped_->requestStreamInfo() : nullptr;
+  }
+  const Http::RequestHeaderMap* downstreamHeaders() const override {
+    return wrapped_ != nullptr ? wrapped_->downstreamHeaders() : nullptr;
+  }
+  const HealthyAndDegradedLoad&
+  determinePriorityLoad(const PrioritySet& priority_set,
+                        const HealthyAndDegradedLoad& original_priority_load,
+                        const Upstream::RetryPriority::PriorityMappingFunc& mapping) override {
+    return wrapped_ != nullptr
+               ? wrapped_->determinePriorityLoad(priority_set, original_priority_load, mapping)
+               : original_priority_load;
+  }
+  Network::Socket::OptionsSharedPtr upstreamSocketOptions() const override {
+    return wrapped_ != nullptr ? wrapped_->upstreamSocketOptions() : nullptr;
+  }
+  Network::TransportSocketOptionsConstSharedPtr upstreamTransportSocketOptions() const override {
+    return wrapped_ != nullptr ? wrapped_->upstreamTransportSocketOptions() : nullptr;
+  }
+  OptRef<const OverrideHost> overrideHostToSelect() const override {
+    return wrapped_ != nullptr ? wrapped_->overrideHostToSelect() : OptRef<const OverrideHost>{};
+  }
+  void onAsyncHostSelection(HostConstSharedPtr&& host, std::string&& details) override {
+    if (wrapped_ != nullptr) {
+      wrapped_->onAsyncHostSelection(std::move(host), std::move(details));
+    }
+  }
+  void setHeadersModifier(std::function<void(Http::ResponseHeaderMap&)> modifier) override {
+    if (wrapped_ != nullptr) {
+      wrapped_->setHeadersModifier(std::move(modifier));
+    }
+  }
+
+private:
+  LoadBalancerContext* const wrapped_;
+  const std::function<bool(const Host&)> is_warm_;
+  const uint32_t retry_budget_;
+};
+
 } // namespace
 
 void ClusterManagerInitHelper::addCluster(ClusterManagerCluster& cm_cluster) {
@@ -1516,6 +1597,28 @@ void ClusterManagerImpl::ThreadLocalClusterManagerImpl::ClusterEntry::updateHost
   }
 }
 
+bool ClusterManagerImpl::ThreadLocalClusterManagerImpl::ClusterEntry::hostHasReadyConnection(
+    const HostConstSharedPtr& host) const {
+  // A host has a "ready connection" only if at least one of its pools on this worker has
+  // a connection that can accept a new stream without creating a new one (i.e. not at the
+  // concurrent-stream limit). Checking cx_active alone is insufficient: an HTTP/2 connection
+  // at max_concurrent_streams is "active" but useless for a new request.
+  auto* container = parent_.getHttpConnPoolsContainer(host);
+  if (container == nullptr || container->pools_ == nullptr) {
+    return false;
+  }
+  return container->pools_->hasReadyConnection();
+}
+
+bool ClusterManagerImpl::ThreadLocalClusterManagerImpl::ClusterEntry::hostHasReadyConnection(
+    const Host& host) const {
+  // The connection pool map is keyed by HostConstSharedPtr, but the load balancer hands
+  // us the host by reference during selection. Construct a non-owning aliased shared_ptr
+  // that points at `host`; std::hash and equality for shared_ptr use the stored raw
+  // pointer, so this matches the map key without affecting the host's refcount.
+  return hostHasReadyConnection(HostConstSharedPtr(HostConstSharedPtr(), &host));
+}
+
 void ClusterManagerImpl::ThreadLocalClusterManagerImpl::ClusterEntry::drainConnPools(
     const HostVector& hosts_removed) {
   for (const auto& host : hosts_removed) {
@@ -2071,7 +2174,15 @@ HostSelectionResponse ClusterManagerImpl::ThreadLocalClusterManagerImpl::Cluster
   }
 
   if (!override_result.strict) {
-    Upstream::HostSelectionResponse host_selection = lb_->chooseHost(context);
+    // If connection-aware load balancing is enabled, wrap the context so the load
+    // balancer's own host-rejection retry loop skips hosts without a ready connection
+    // on this worker. The LB advances its state once per attempt and returns the host
+    // it lands on; if all attempts are cold it returns the last pick (cold-start
+    // fallback). Cold hosts encountered along the way are stimulated so future picks
+    // find them ready.
+    Upstream::HostSelectionResponse host_selection =
+        cluster_info_->connectionAwareLoadBalancingEnabled() ? chooseHostConnectionAware(context)
+                                                             : lb_->chooseHost(context);
     if (host_selection.host || host_selection.cancelable) {
       return host_selection;
     }
@@ -2093,6 +2204,41 @@ HostSelectionResponse ClusterManagerImpl::ThreadLocalClusterManagerImpl::Cluster
     }
   }
   return response;
+}
+
+HostSelectionResponse
+ClusterManagerImpl::ThreadLocalClusterManagerImpl::ClusterEntry::chooseHostConnectionAware(
+    LoadBalancerContext* context) {
+  // Number of extra attempts the LB's retry loop should make to find a host with a
+  // ready connection before falling back to whatever it last picked. Bounded to keep
+  // cold-start cost low; the LB advances its state once per attempt.
+  static constexpr uint32_t kConnectionAwareRetryBudget = 3;
+
+  ConnectionAwareLbContext wrapper(
+      context, [this](const Host& host) { return hostHasReadyConnection(host); },
+      kConnectionAwareRetryBudget);
+
+  HostSelectionResponse selection = lb_->chooseHost(&wrapper);
+  if (selection.host == nullptr) {
+    return selection;
+  }
+
+  if (hostHasReadyConnection(*selection.host)) {
+    // The filter steered us to (or the LB happened to pick) a host that is already warm.
+    cluster_info_->trafficStats()->upstream_cx_lb_repicked_.inc();
+  } else {
+    // Cold-start fallback: every host the LB offered was cold. Stimulate the host we are
+    // about to use so the next request to it finds a ready connection. selection.host is
+    // an owning shared_ptr, so it is safe to hand to the pool. The downstream protocol is
+    // not known at selection time and is left unset; socket/transport options come from
+    // the wrapped context.
+    auto* pool =
+        httpConnPoolImpl(selection.host, ResourcePriority::Default, absl::nullopt, context);
+    if (pool != nullptr && pool->maybePreconnect(1.1)) {
+      cluster_info_->trafficStats()->upstream_cx_lb_stimulated_.inc();
+    }
+  }
+  return selection;
 }
 
 HostConstSharedPtr ClusterManagerImpl::ThreadLocalClusterManagerImpl::ClusterEntry::peekAnotherHost(

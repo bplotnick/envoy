@@ -427,6 +427,15 @@ bool ConnectivityGrid::hasActiveConnections() const {
   }
   return false;
 }
+
+bool ConnectivityGrid::hasReadyConnection() const {
+  for (const auto& pool : pools_) {
+    if (pool->hasReadyConnection()) {
+      return true;
+    }
+  }
+  return false;
+}
 ConnectionPool::Cancellable* ConnectivityGrid::newStream(Http::ResponseDecoder& decoder,
                                                          ConnectionPool::Callbacks& callbacks,
                                                          const Instance::StreamOptions& options) {

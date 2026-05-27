@@ -199,6 +199,7 @@ public:
 
   // Http::ConnPool::Instance
   bool hasActiveConnections() const override;
+  bool hasReadyConnection() const override;
   ConnectionPool::Cancellable* newStream(Http::ResponseDecoder& response_decoder,
                                          ConnectionPool::Callbacks& callbacks,
                                          const Instance::StreamOptions& options) override;

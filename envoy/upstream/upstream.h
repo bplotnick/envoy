@@ -718,6 +718,8 @@ public:
   COUNTER(original_dst_host_invalid)                                                               \
   COUNTER(retry_or_shadow_abandoned)                                                               \
   COUNTER(upstream_cx_close_notify)                                                                \
+  COUNTER(upstream_cx_lb_repicked)                                                                 \
+  COUNTER(upstream_cx_lb_stimulated)                                                               \
   COUNTER(upstream_cx_connect_attempts_exceeded)                                                   \
   COUNTER(upstream_cx_connect_fail)                                                                \
   COUNTER(upstream_cx_connect_timeout)                                                             \
@@ -1045,6 +1047,14 @@ public:
    * @return how many streams should be anticipated per each current stream.
    */
   virtual float peekaheadRatio() const PURE;
+
+  /**
+   * @return true if connection-aware load balancing is enabled for this cluster.
+   * When enabled, host selection prefers hosts that already have at least one
+   * established connection on the current worker thread, falling back to the
+   * underlying load balancer's choice if no ready host is found.
+   */
+  virtual bool connectionAwareLoadBalancingEnabled() const PURE;
 
   /**
    * @return soft limit on size of the cluster's connections read and write buffers.
