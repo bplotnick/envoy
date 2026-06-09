@@ -201,7 +201,7 @@ void ConnectionManagerImpl::initializeReadFilterCallbacks(Network::ReadFilterCal
         std::make_unique<Network::ProxyProtocolFilterState>(Network::ProxyProtocolData{
             read_callbacks_->connection().connectionInfoProvider().remoteAddress(),
             read_callbacks_->connection().connectionInfoProvider().localAddress()}),
-        StreamInfo::FilterState::StateType::Mutable, StreamInfo::FilterState::LifeSpan::Connection);
+        StreamInfo::FilterState::LifeSpan::Connection);
   }
 
   if (config_->idleTimeout()) {
@@ -687,6 +687,11 @@ void ConnectionManagerImpl::doConnectionClose(
 
     stats_.named_.downstream_cx_destroy_active_rq_.inc();
     user_agent_.onConnectionDestroy(event, true);
+    // Record the downstream connection end time point for COMMON_DURATION access logging.
+    for (auto& stream : streams_) {
+      stream->filter_manager_.streamInfo().downstreamTiming().onDownstreamConnectionEnd(
+          time_source_);
+    }
     // Note that resetAllStreams() does not actually write anything to the wire. It just resets
     // all upstream streams and their filter stacks. Thus, there are no issues around recursive
     // entry.
@@ -928,6 +933,10 @@ ConnectionManagerImpl::ActiveStream::ActiveStream(ConnectionManagerImpl& connect
 
   filter_manager_.streamInfo().setShouldSchemeMatchUpstream(
       connection_manager.config_->shouldSchemeMatchUpstream());
+
+  // Record the downstream connection begin time point for COMMON_DURATION access logging.
+  filter_manager_.streamInfo().downstreamTiming().setDownstreamConnectionBegin(
+      connection_manager_.read_callbacks_->connection().streamInfo().startTimeMonotonic());
 
   // TODO(chaoqin-li1123): can this be moved to the on demand filter?
   auto factory = Envoy::Config::Utility::getFactoryByName<RouteConfigUpdateRequesterFactory>(
@@ -1516,7 +1525,7 @@ void ConnectionManagerImpl::ActiveStream::decodeHeaders(RequestHeaderMapSharedPt
     filter_manager_.streamInfo().filterState()->setData(
         Router::OriginalConnectPort::key(),
         std::make_unique<Router::OriginalConnectPort>(optional_port.value()),
-        StreamInfo::FilterState::StateType::ReadOnly, StreamInfo::FilterState::LifeSpan::Request);
+        StreamInfo::FilterState::LifeSpan::Request);
   }
 
   if (!state_.is_internally_created_) { // Only sanitize headers on first pass.
