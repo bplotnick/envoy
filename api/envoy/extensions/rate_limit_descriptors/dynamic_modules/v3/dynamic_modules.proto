@@ -20,7 +20,9 @@ option (udpa.annotations.file_status).package_version_status = ACTIVE;
 
 // Configuration for a dynamic module rate limit descriptor producer. The module is invoked while
 // Envoy builds a rate limit descriptor and can use the local service cluster, request headers,
-// stream info attributes, and dynamic metadata to produce one descriptor entry.
+// stream info attributes, and dynamic metadata to produce one descriptor entry. A module can also
+// cache an opaque parsed or computed value in request filter state for other descriptor producers
+// in the same request.
 message DynamicModuleRateLimitDescriptor {
   // Specifies the shared-object level configuration. This field is required.
   //

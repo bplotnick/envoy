@@ -23,8 +23,7 @@ public:
                   Server::Configuration::CommonFactoryContext& context,
                   absl::Status& creation_status, bool no_limit = true);
 
-  void populateDescriptors(const Http::RequestHeaderMap& headers,
-                           const StreamInfo::StreamInfo& info,
+  void populateDescriptors(const Http::RequestHeaderMap& headers, StreamInfo::StreamInfo& info,
                            const std::string& local_service_cluster,
                            RateLimitDescriptors& descriptors) const;
 
@@ -50,8 +49,7 @@ public:
 
   size_t size() const { return rate_limit_policies_.size(); }
 
-  void populateDescriptors(const Http::RequestHeaderMap& headers,
-                           const StreamInfo::StreamInfo& info,
+  void populateDescriptors(const Http::RequestHeaderMap& headers, StreamInfo::StreamInfo& info,
                            const std::string& local_service_cluster,
                            RateLimitDescriptors& descriptors, bool on_stream_done = false) const;
 

@@ -114,6 +114,19 @@ TEST_F(DynamicModuleRateLimitDescriptorTest, RustSdkModuleProducesEntry) {
   EXPECT_TRUE(descriptor->populateDescriptor(entry, "local-cluster", headers, stream_info_));
   EXPECT_EQ("rust-key", entry.key_);
   EXPECT_EQ("rust-value", entry.value_);
+
+  headers.setCopy(Http::LowerCaseString("x-rate-limit-value"), "changed-after-cache");
+  auto second_module = Extensions::DynamicModules::newDynamicModule(
+      Extensions::DynamicModules::testSharedObjectPath("rate_limit_descriptor_integration_test",
+                                                       "rust"),
+      true);
+  ASSERT_TRUE(second_module.ok()) << second_module.status();
+  auto second_descriptor =
+      createDescriptor(std::move(second_module.value()), "rust-key", "fallback");
+  RateLimit::DescriptorEntry second_entry;
+  EXPECT_TRUE(
+      second_descriptor->populateDescriptor(second_entry, "local-cluster", headers, stream_info_));
+  EXPECT_EQ("rust-value", second_entry.value_);
 }
 
 TEST_F(DynamicModuleRateLimitDescriptorTest, LocalRateLimitPolicyUsesDynamicModuleDescriptor) {
@@ -139,6 +152,11 @@ TEST_F(DynamicModuleRateLimitDescriptorTest, LocalRateLimitPolicyUsesDynamicModu
   ASSERT_EQ(1, descriptors[0].entries_.size());
   EXPECT_EQ("local-key", descriptors[0].entries_[0].key_);
   EXPECT_EQ("local-value", descriptors[0].entries_[0].value_);
+
+  headers.setCopy(Http::LowerCaseString("x-abort-descriptor"), "true");
+  descriptors.clear();
+  policy.populateDescriptors(headers, stream_info_, "local-cluster", descriptors);
+  EXPECT_TRUE(descriptors.empty());
 }
 
 } // namespace

@@ -130,13 +130,16 @@ public:
    * @param descriptor_entry supplies the descriptor entry to optionally fill.
    * @param local_service_cluster supplies the name of the local service cluster.
    * @param headers supplies the header for the request.
-   * @param info stream info associated with the request
-   * @return true if the producer populated the descriptor.
+   * @param info supplies mutable stream info associated with the request. Producers may use its
+   * filter state to cache request-scoped work shared by multiple descriptor actions.
+   * @return true to continue building the descriptor. Returning true with an empty entry skips
+   * this action. Returning false abandons the entire descriptor so a partial descriptor cannot
+   * match another configured rate limit.
    */
   virtual bool populateDescriptor(DescriptorEntry& descriptor_entry,
                                   const std::string& local_service_cluster,
                                   const Http::RequestHeaderMap& headers,
-                                  const StreamInfo::StreamInfo& info) const PURE;
+                                  StreamInfo::StreamInfo& info) const PURE;
 };
 
 using DescriptorProducerPtr = std::unique_ptr<DescriptorProducer>;

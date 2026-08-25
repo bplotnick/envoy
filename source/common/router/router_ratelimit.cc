@@ -22,7 +22,7 @@ namespace {
 bool populateDescriptor(const std::vector<RateLimit::DescriptorProducerPtr>& actions,
                         std::vector<RateLimit::DescriptorEntry>& descriptor_entries,
                         const std::string& local_service_cluster,
-                        const Http::RequestHeaderMap& headers, const StreamInfo::StreamInfo& info) {
+                        const Http::RequestHeaderMap& headers, StreamInfo::StreamInfo& info) {
   bool result = true;
   for (const RateLimit::DescriptorProducerPtr& action : actions) {
     RateLimit::DescriptorEntry descriptor_entry;
@@ -44,7 +44,7 @@ bool populateDescriptor(const std::vector<RateLimit::DescriptorProducerPtr>& act
 bool MatchInputRateLimitDescriptor::populateDescriptor(RateLimit::DescriptorEntry& descriptor_entry,
                                                        const std::string&,
                                                        const Http::RequestHeaderMap& headers,
-                                                       const StreamInfo::StreamInfo& info) const {
+                                                       StreamInfo::StreamInfo& info) const {
   Http::Matching::HttpMatchingDataImpl data(info);
   data.onRequestHeaders(headers);
   auto result = data_input_->get(data);
@@ -92,14 +92,14 @@ bool StaticRateLimitOverride::populateOverride(RateLimit::Descriptor& descriptor
 bool SourceClusterAction::populateDescriptor(RateLimit::DescriptorEntry& descriptor_entry,
                                              const std::string& local_service_cluster,
                                              const Http::RequestHeaderMap&,
-                                             const StreamInfo::StreamInfo&) const {
+                                             StreamInfo::StreamInfo&) const {
   descriptor_entry = {"source_cluster", local_service_cluster};
   return true;
 }
 
 bool DestinationClusterAction::populateDescriptor(RateLimit::DescriptorEntry& descriptor_entry,
                                                   const std::string&, const Http::RequestHeaderMap&,
-                                                  const StreamInfo::StreamInfo& info) const {
+                                                  StreamInfo::StreamInfo& info) const {
   const auto route = info.route();
   if (!route || route->routeEntry() == nullptr) {
     return false;
@@ -111,7 +111,7 @@ bool DestinationClusterAction::populateDescriptor(RateLimit::DescriptorEntry& de
 bool RequestHeadersAction::populateDescriptor(RateLimit::DescriptorEntry& descriptor_entry,
                                               const std::string&,
                                               const Http::RequestHeaderMap& headers,
-                                              const StreamInfo::StreamInfo&) const {
+                                              StreamInfo::StreamInfo&) const {
   const auto header_value = headers.get(header_name_);
 
   // If header is not present in the request and if skip_if_absent is true skip this descriptor,
@@ -127,7 +127,7 @@ bool RequestHeadersAction::populateDescriptor(RateLimit::DescriptorEntry& descri
 
 bool RemoteAddressAction::populateDescriptor(RateLimit::DescriptorEntry& descriptor_entry,
                                              const std::string&, const Http::RequestHeaderMap&,
-                                             const StreamInfo::StreamInfo& info) const {
+                                             StreamInfo::StreamInfo& info) const {
   const Network::Address::InstanceConstSharedPtr& remote_address =
       info.downstreamAddressProvider().remoteAddress();
   if (remote_address->type() != Network::Address::Type::Ip) {
@@ -142,7 +142,7 @@ bool RemoteAddressAction::populateDescriptor(RateLimit::DescriptorEntry& descrip
 bool MaskedRemoteAddressAction::populateDescriptor(RateLimit::DescriptorEntry& descriptor_entry,
                                                    const std::string&,
                                                    const Http::RequestHeaderMap&,
-                                                   const StreamInfo::StreamInfo& info) const {
+                                                   StreamInfo::StreamInfo& info) const {
   const Network::Address::InstanceConstSharedPtr& remote_address =
       info.downstreamAddressProvider().remoteAddress();
   if (remote_address->type() != Network::Address::Type::Ip) {
@@ -173,7 +173,7 @@ GenericKeyAction::GenericKeyAction(
 
 bool GenericKeyAction::populateDescriptor(RateLimit::DescriptorEntry& descriptor_entry,
                                           const std::string&, const Http::RequestHeaderMap& headers,
-                                          const StreamInfo::StreamInfo& info) const {
+                                          StreamInfo::StreamInfo& info) const {
   if (descriptor_formatter_ == nullptr) {
     descriptor_entry = {descriptor_key_, descriptor_value_};
     return true;
@@ -205,7 +205,7 @@ MetaDataAction::MetaDataAction(
 
 bool MetaDataAction::populateDescriptor(RateLimit::DescriptorEntry& descriptor_entry,
                                         const std::string&, const Http::RequestHeaderMap&,
-                                        const StreamInfo::StreamInfo& info) const {
+                                        StreamInfo::StreamInfo& info) const {
   const envoy::config::core::v3::Metadata* metadata_source;
 
   switch (source_) {
@@ -229,7 +229,7 @@ bool MetaDataAction::populateDescriptor(RateLimit::DescriptorEntry& descriptor_e
     // This means that the cluster locality metadata can only be used on the
     // response path (apply_on_stream_done is set to true) or in a scenario where host selection is
     // done before the rate limit action is executed.
-    if (upstream_info.has_value() && upstream_info->upstreamHost()) {
+    if (upstream_info != nullptr && upstream_info->upstreamHost()) {
       metadata_source = upstream_info->upstreamHost()->localityMetadata().get();
     } else {
       metadata_source = nullptr;
@@ -264,7 +264,7 @@ QueryParametersAction::QueryParametersAction(
 bool QueryParametersAction::populateDescriptor(RateLimit::DescriptorEntry& descriptor_entry,
                                                const std::string&,
                                                const Http::RequestHeaderMap& headers,
-                                               const StreamInfo::StreamInfo&) const {
+                                               StreamInfo::StreamInfo&) const {
   Http::Utility::QueryParamsMulti query_parameters =
       Http::Utility::QueryParamsMulti::parseAndDecodeQueryString(headers.getPathValue());
 
@@ -295,7 +295,7 @@ HeaderValueMatchAction::HeaderValueMatchAction(
 bool HeaderValueMatchAction::populateDescriptor(RateLimit::DescriptorEntry& descriptor_entry,
                                                 const std::string&,
                                                 const Http::RequestHeaderMap& headers,
-                                                const StreamInfo::StreamInfo& info) const {
+                                                StreamInfo::StreamInfo& info) const {
   if (expect_match_ != Http::HeaderUtility::matchHeaders(headers, action_headers_)) {
     return false;
   }
@@ -331,7 +331,7 @@ QueryParameterValueMatchAction::QueryParameterValueMatchAction(
 
 bool QueryParameterValueMatchAction::populateDescriptor(
     RateLimit::DescriptorEntry& descriptor_entry, const std::string&,
-    const Http::RequestHeaderMap& headers, const StreamInfo::StreamInfo& info) const {
+    const Http::RequestHeaderMap& headers, StreamInfo::StreamInfo& info) const {
   Http::Utility::QueryParamsMulti query_parameters =
       Http::Utility::QueryParamsMulti::parseAndDecodeQueryString(headers.getPathValue());
   if (expect_match_ !=
@@ -384,7 +384,7 @@ RemoteAddressMatchAction::RemoteAddressMatchAction(
 bool RemoteAddressMatchAction::populateDescriptor(RateLimit::DescriptorEntry& descriptor_entry,
                                                   const std::string&,
                                                   const Http::RequestHeaderMap& headers,
-                                                  const StreamInfo::StreamInfo& info) const {
+                                                  StreamInfo::StreamInfo& info) const {
   // Check if remote address matches the address matcher
   const Network::Address::InstanceConstSharedPtr& remote_address =
       info.downstreamAddressProvider().remoteAddress();
@@ -547,7 +547,7 @@ RateLimitPolicyEntryImpl::RateLimitPolicyEntryImpl(
 void RateLimitPolicyEntryImpl::populateDescriptors(std::vector<RateLimit::Descriptor>& descriptors,
                                                    const std::string& local_service_cluster,
                                                    const Http::RequestHeaderMap& headers,
-                                                   const StreamInfo::StreamInfo& info) const {
+                                                   StreamInfo::StreamInfo& info) const {
   RateLimit::Descriptor descriptor;
   const bool result =
       populateDescriptor(actions_, descriptor.entries_, local_service_cluster, headers, info);
@@ -565,7 +565,7 @@ void RateLimitPolicyEntryImpl::populateDescriptors(std::vector<RateLimit::Descri
 void RateLimitPolicyEntryImpl::populateLocalDescriptors(
     std::vector<Envoy::RateLimit::LocalDescriptor>& descriptors,
     const std::string& local_service_cluster, const Http::RequestHeaderMap& headers,
-    const StreamInfo::StreamInfo& info) const {
+    StreamInfo::StreamInfo& info) const {
   RateLimit::LocalDescriptor descriptor({});
   const bool result =
       populateDescriptor(actions_, descriptor.entries_, local_service_cluster, headers, info);

@@ -24,6 +24,7 @@ using OnRateLimitDescriptorConfigDestroyType =
     decltype(&envoy_dynamic_module_on_rate_limit_descriptor_config_destroy);
 using OnRateLimitDescriptorPopulateType =
     decltype(&envoy_dynamic_module_on_rate_limit_descriptor_populate);
+using DynamicModuleSharedPtr = std::shared_ptr<Extensions::DynamicModules::DynamicModule>;
 
 class DynamicModuleRateLimitDescriptor : public RateLimit::DescriptorProducer {
 public:
@@ -36,11 +37,13 @@ public:
   bool populateDescriptor(RateLimit::DescriptorEntry& descriptor_entry,
                           const std::string& local_service_cluster,
                           const Http::RequestHeaderMap& headers,
-                          const StreamInfo::StreamInfo& info) const override;
+                          StreamInfo::StreamInfo& info) const override;
 
   envoy_dynamic_module_type_rate_limit_descriptor_config_module_ptr in_module_config_{nullptr};
   OnRateLimitDescriptorConfigDestroyType on_config_destroy_{nullptr};
   OnRateLimitDescriptorPopulateType on_populate_{nullptr};
+
+  const DynamicModuleSharedPtr& dynamicModuleSharedPtr() const { return dynamic_module_; }
 
 private:
   friend absl::StatusOr<std::unique_ptr<DynamicModuleRateLimitDescriptor>>
@@ -49,7 +52,7 @@ private:
 
   const std::string descriptor_name_;
   const std::string descriptor_config_;
-  const Extensions::DynamicModules::DynamicModulePtr dynamic_module_;
+  const DynamicModuleSharedPtr dynamic_module_;
 };
 
 absl::StatusOr<std::unique_ptr<DynamicModuleRateLimitDescriptor>>
@@ -57,9 +60,10 @@ newDynamicModuleRateLimitDescriptor(const DynamicModuleRateLimitDescriptorProto&
                                     Extensions::DynamicModules::DynamicModulePtr dynamic_module);
 
 struct RateLimitDescriptorContext {
+  const DynamicModuleSharedPtr& dynamic_module;
   const std::string& local_service_cluster;
   const Http::RequestHeaderMap& headers;
-  const StreamInfo::StreamInfo& stream_info;
+  StreamInfo::StreamInfo& stream_info;
   RateLimit::DescriptorEntry descriptor_entry;
 };
 

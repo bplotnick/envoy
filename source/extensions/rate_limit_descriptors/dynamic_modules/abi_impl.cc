@@ -1,3 +1,5 @@
+#include "envoy/stream_info/filter_state.h"
+
 #include "source/extensions/dynamic_modules/abi/abi.h"
 #include "source/extensions/dynamic_modules/abi_context_accessors.h"
 #include "source/extensions/rate_limit_descriptors/dynamic_modules/descriptor.h"
@@ -16,6 +18,28 @@ RateLimitDescriptorContext*
 rateLimitDescriptorContext(envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr ptr) {
   return static_cast<RateLimitDescriptorContext*>(ptr);
 }
+
+class DynamicModuleRateLimitDescriptorFilterStateObject : public StreamInfo::FilterState::Object {
+public:
+  DynamicModuleRateLimitDescriptorFilterStateObject(
+      DynamicModuleSharedPtr dynamic_module,
+      envoy_dynamic_module_type_filter_state_object_module_ptr object,
+      envoy_dynamic_module_type_filter_state_object_destructor destructor)
+      : dynamic_module_(std::move(dynamic_module)), object_(object), destructor_(destructor) {}
+
+  ~DynamicModuleRateLimitDescriptorFilterStateObject() override {
+    if (destructor_ != nullptr) {
+      destructor_(object_);
+    }
+  }
+
+  envoy_dynamic_module_type_filter_state_object_module_ptr object() const { return object_; }
+
+private:
+  const DynamicModuleSharedPtr dynamic_module_;
+  envoy_dynamic_module_type_filter_state_object_module_ptr object_;
+  envoy_dynamic_module_type_filter_state_object_destructor destructor_;
+};
 
 } // namespace
 
@@ -89,6 +113,51 @@ void envoy_dynamic_module_callback_rate_limit_descriptor_set_descriptor_entry(
   auto* context = rateLimitDescriptorContext(context_envoy_ptr);
   context->descriptor_entry.key_.assign(key.ptr, key.length);
   context->descriptor_entry.value_.assign(value.ptr, value.length);
+}
+
+bool envoy_dynamic_module_callback_rate_limit_descriptor_set_filter_state_object(
+    envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr context_envoy_ptr,
+    envoy_dynamic_module_type_module_buffer key,
+    envoy_dynamic_module_type_filter_state_object_module_ptr module_object,
+    envoy_dynamic_module_type_filter_state_object_destructor destructor) {
+  auto* context = rateLimitDescriptorContext(context_envoy_ptr);
+  auto free_object = [&]() {
+    if (destructor != nullptr) {
+      destructor(module_object);
+    }
+  };
+  const auto& filter_state = context->stream_info.filterState();
+  if (filter_state == nullptr) {
+    free_object();
+    return false;
+  }
+
+  const absl::string_view key_view(key.ptr, key.length);
+  filter_state->setData(key_view,
+                        std::make_shared<DynamicModuleRateLimitDescriptorFilterStateObject>(
+                            context->dynamic_module, module_object, destructor),
+                        StreamInfo::FilterState::LifeSpan::Request);
+  auto* stored =
+      filter_state->getDataMutable<DynamicModuleRateLimitDescriptorFilterStateObject>(key_view);
+  return stored != nullptr && stored->object() == module_object;
+}
+
+envoy_dynamic_module_type_filter_state_object_module_ptr
+envoy_dynamic_module_callback_rate_limit_descriptor_get_filter_state_object(
+    envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr context_envoy_ptr,
+    envoy_dynamic_module_type_module_buffer key) {
+  auto* context = rateLimitDescriptorContext(context_envoy_ptr);
+  const auto& filter_state = context->stream_info.filterState();
+  if (filter_state == nullptr) {
+    return nullptr;
+  }
+  const absl::string_view key_view(key.ptr, key.length);
+  auto* stored =
+      filter_state->getDataMutable<DynamicModuleRateLimitDescriptorFilterStateObject>(key_view);
+  if (stored == nullptr) {
+    return nullptr;
+  }
+  return stored->object();
 }
 
 } // extern "C"

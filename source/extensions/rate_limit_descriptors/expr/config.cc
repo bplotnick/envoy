@@ -30,7 +30,7 @@ public:
   // Ratelimit::DescriptorProducer
   bool populateDescriptor(RateLimit::DescriptorEntry& descriptor_entry, const std::string&,
                           const Http::RequestHeaderMap& headers,
-                          const StreamInfo::StreamInfo& info) const override {
+                          StreamInfo::StreamInfo& info) const override {
     Protobuf::Arena arena;
     const auto result = compiled_expr_.evaluate(arena, nullptr, info, &headers, nullptr, nullptr);
     if (!result.has_value() || result.value().IsError()) {

@@ -203,6 +203,52 @@ impl RateLimitDescriptorContext {
     }
   }
 
+  /// Store an opaque, module-owned object in request-lifetime filter state under `key`.
+  ///
+  /// This can cache a parsed or computed value for later descriptor producers in the same request.
+  /// Ownership transfers to Envoy on every path: `destructor` runs exactly once, either when the
+  /// request state is destroyed or before this returns `false`.
+  ///
+  /// # Safety
+  ///
+  /// `object` must be valid for `destructor` to free. The destructor must not unwind because it
+  /// runs on the request teardown path outside an FFI unwind guard.
+  pub unsafe fn set_filter_state_object(
+    &mut self,
+    key: &[u8],
+    object: *mut c_void,
+    destructor: extern "C" fn(*mut c_void),
+  ) -> bool {
+    let destructor: unsafe extern "C" fn(*mut c_void) = destructor;
+    unsafe {
+      abi::envoy_dynamic_module_callback_rate_limit_descriptor_set_filter_state_object(
+        self.envoy_ptr,
+        crate::bytes_to_module_buffer(key),
+        object,
+        Some(destructor),
+      )
+    }
+  }
+
+  /// Borrow an opaque object stored through the descriptor ABI in request filter state under `key`.
+  ///
+  /// Ownership remains with Envoy. The pointer is valid until the entry is destroyed or
+  /// overwritten. Modules must namespace keys and use the same concrete object type for every use
+  /// of a shared key.
+  pub fn get_filter_state_object(&self, key: &[u8]) -> Option<*mut c_void> {
+    let object = unsafe {
+      abi::envoy_dynamic_module_callback_rate_limit_descriptor_get_filter_state_object(
+        self.envoy_ptr,
+        crate::bytes_to_module_buffer(key),
+      )
+    };
+    if object.is_null() {
+      None
+    } else {
+      Some(object)
+    }
+  }
+
   /// Set the descriptor entry produced for this request.
   ///
   /// Envoy copies both strings before this function returns. A later call replaces the entry.

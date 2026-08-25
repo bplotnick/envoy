@@ -63,7 +63,7 @@ public:
   virtual void populateDescriptors(std::vector<RateLimit::Descriptor>& descriptors,
                                    const std::string& local_service_cluster,
                                    const Http::RequestHeaderMap& headers,
-                                   const StreamInfo::StreamInfo& info) const PURE;
+                                   StreamInfo::StreamInfo& info) const PURE;
 
   /**
    * Potentially populate the local descriptor array with new descriptors to query.
@@ -75,7 +75,7 @@ public:
   virtual void populateLocalDescriptors(std::vector<RateLimit::LocalDescriptor>& descriptors,
                                         const std::string& local_service_cluster,
                                         const Http::RequestHeaderMap& headers,
-                                        const StreamInfo::StreamInfo& info) const PURE;
+                                        StreamInfo::StreamInfo& info) const PURE;
 };
 
 /**

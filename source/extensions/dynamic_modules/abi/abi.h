@@ -15268,6 +15268,50 @@ void envoy_dynamic_module_callback_rate_limit_descriptor_set_descriptor_entry(
     envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr context_envoy_ptr,
     envoy_dynamic_module_type_module_buffer key, envoy_dynamic_module_type_module_buffer value);
 
+// -----------------------------------------------------------------------------
+// Rate Limit Descriptor Callbacks - Per-Request State
+// -----------------------------------------------------------------------------
+
+/**
+ * envoy_dynamic_module_callback_rate_limit_descriptor_set_filter_state_object stores an opaque,
+ * module-owned object in the request's filter state under the given key. This allows multiple
+ * descriptor producers in the same policy to share a parsed or computed value without repeating
+ * the work for each descriptor entry.
+ *
+ * Envoy never interprets the object. It calls destructor(module_object) exactly once when the
+ * request filter state is destroyed or the entry is overwritten.
+ *
+ * @param context_envoy_ptr is the per-request descriptor production context.
+ * @param key is the module-owned filter state key. Modules should namespace keys to avoid
+ * collisions with other extensions.
+ * @param module_object is the opaque object to store. Ownership transfers to Envoy on every path.
+ * @param destructor is called exactly once with module_object when the entry is destroyed, or
+ * before returning false so that a failed store does not leak the object. It must not unwind.
+ * @return true if the object was stored. Returns false, after calling destructor, if filter state
+ * is unavailable or the key conflicts with an entry at a different lifespan.
+ */
+bool envoy_dynamic_module_callback_rate_limit_descriptor_set_filter_state_object(
+    envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr context_envoy_ptr,
+    envoy_dynamic_module_type_module_buffer key,
+    envoy_dynamic_module_type_filter_state_object_module_ptr module_object,
+    envoy_dynamic_module_type_filter_state_object_destructor destructor);
+
+/**
+ * envoy_dynamic_module_callback_rate_limit_descriptor_get_filter_state_object borrows the opaque
+ * object previously stored under the given key through the rate limit descriptor ABI.
+ *
+ * @param context_envoy_ptr is the per-request descriptor production context.
+ * @param key is the module-owned filter state key.
+ * @return the stored object, or NULL if the key does not exist or was not stored through this ABI.
+ * Ownership stays with Envoy. The pointer remains valid until the entry is destroyed or overwritten
+ * and must not be freed by the module. Modules must namespace keys and agree on the object type for
+ * any key they share.
+ */
+envoy_dynamic_module_type_filter_state_object_module_ptr
+envoy_dynamic_module_callback_rate_limit_descriptor_get_filter_state_object(
+    envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr context_envoy_ptr,
+    envoy_dynamic_module_type_module_buffer key);
+
 #ifdef __cplusplus
 }
 #endif

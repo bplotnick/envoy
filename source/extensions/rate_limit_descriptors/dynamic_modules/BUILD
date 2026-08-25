@@ -18,6 +18,7 @@ envoy_cc_library(
     hdrs = ["descriptor.h"],
     deps = [
         "//envoy/ratelimit:ratelimit_interface",
+        "//envoy/stream_info:filter_state_interface",
         "//source/common/common:assert_lib",
         "//source/common/protobuf:utility_lib",
         "//source/extensions/dynamic_modules:abi_context_accessors_lib",

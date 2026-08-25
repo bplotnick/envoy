@@ -47,7 +47,7 @@ public:
   // Ratelimit::DescriptorProducer
   bool populateDescriptor(RateLimit::DescriptorEntry& descriptor_entry, const std::string&,
                           const Http::RequestHeaderMap& headers,
-                          const StreamInfo::StreamInfo&) const override {
+                          StreamInfo::StreamInfo&) const override {
     std::optional<std::string> claim_value = extractClaimValue(headers);
     if (claim_value.has_value()) {
       descriptor_entry = {descriptor_key_, std::move(claim_value.value())};

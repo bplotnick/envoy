@@ -3,4 +3,5 @@ produce entries for local and global HTTP rate limit descriptors from request he
 attributes, dynamic metadata, and the local service cluster. See
 :ref:`DynamicModuleRateLimitDescriptor <envoy_v3_api_msg_extensions.rate_limit_descriptors.dynamic_modules.v3.DynamicModuleRateLimitDescriptor>`
 for configuration details. The Rust SDK exposes the interface through its
-``rate_limit_descriptor`` module.
+``rate_limit_descriptor`` module, including request-lifetime opaque objects for sharing parsed or
+computed values across descriptor producers.

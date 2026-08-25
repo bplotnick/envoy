@@ -2983,6 +2983,15 @@ __attribute__((weak)) bool envoy_dynamic_module_callback_rate_limit_descriptor_g
   return false;
 }
 
+__attribute__((weak)) envoy_dynamic_module_type_filter_state_object_module_ptr
+envoy_dynamic_module_callback_rate_limit_descriptor_get_filter_state_object(
+    envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr,
+    envoy_dynamic_module_type_module_buffer) {
+  IS_ENVOY_BUG("envoy_dynamic_module_callback_rate_limit_descriptor_get_filter_state_object: not "
+               "implemented in this context");
+  return nullptr;
+}
+
 __attribute__((weak)) bool
 envoy_dynamic_module_callback_rate_limit_descriptor_get_local_service_cluster(
     envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr,
@@ -3023,6 +3032,17 @@ __attribute__((weak)) void envoy_dynamic_module_callback_rate_limit_descriptor_s
     envoy_dynamic_module_type_module_buffer, envoy_dynamic_module_type_module_buffer) {
   IS_ENVOY_BUG("envoy_dynamic_module_callback_rate_limit_descriptor_set_descriptor_entry: not "
                "implemented in this context");
+}
+
+__attribute__((weak)) bool
+envoy_dynamic_module_callback_rate_limit_descriptor_set_filter_state_object(
+    envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr,
+    envoy_dynamic_module_type_module_buffer,
+    envoy_dynamic_module_type_filter_state_object_module_ptr,
+    envoy_dynamic_module_type_filter_state_object_destructor) {
+  IS_ENVOY_BUG("envoy_dynamic_module_callback_rate_limit_descriptor_set_filter_state_object: not "
+               "implemented in this context");
+  return false;
 }
 
 __attribute__((weak)) envoy_dynamic_module_type_access_log_type

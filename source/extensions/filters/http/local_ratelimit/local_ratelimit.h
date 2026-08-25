@@ -122,8 +122,7 @@ public:
     return !rate_limit_config_->empty();
   }
 
-  void populateDescriptors(const Http::RequestHeaderMap& headers,
-                           const StreamInfo::StreamInfo& info,
+  void populateDescriptors(const Http::RequestHeaderMap& headers, StreamInfo::StreamInfo& info,
                            Filters::Common::RateLimit::RateLimitDescriptors& descriptors) const {
     ASSERT(rate_limit_config_ != nullptr);
     rate_limit_config_->populateDescriptors(headers, info, local_info_.clusterName(), descriptors);

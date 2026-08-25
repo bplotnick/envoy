@@ -13,6 +13,13 @@ namespace {
 
 using ::testing::NiceMock;
 
+int filter_state_object_destructor_calls = 0;
+
+void filterStateObjectDestructor(envoy_dynamic_module_type_filter_state_object_module_ptr object) {
+  filter_state_object_destructor_calls++;
+  delete static_cast<int*>(object);
+}
+
 class RateLimitDescriptorAbiTest : public testing::Test {
 public:
   envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr contextPtr() {
@@ -22,7 +29,10 @@ public:
   std::string local_service_cluster_ = "local-cluster";
   Http::TestRequestHeaderMapImpl headers_{{":path", "/"}, {"x-test", "first"}};
   NiceMock<StreamInfo::MockStreamInfo> stream_info_;
-  RateLimitDescriptorContext context_{local_service_cluster_, headers_, stream_info_, {}};
+  DynamicModuleSharedPtr dynamic_module_{
+      std::make_shared<Extensions::DynamicModules::DynamicModule>(static_cast<void*>(nullptr))};
+  RateLimitDescriptorContext context_{
+      dynamic_module_, local_service_cluster_, headers_, stream_info_, {}};
 };
 
 TEST_F(RateLimitDescriptorAbiTest, LocalServiceCluster) {
@@ -86,6 +96,30 @@ TEST_F(RateLimitDescriptorAbiTest, MissingAttributesAndMetadata) {
   envoy_dynamic_module_type_module_buffer path{"value", 5};
   EXPECT_FALSE(envoy_dynamic_module_callback_rate_limit_descriptor_get_dynamic_metadata(
       contextPtr(), filter_name, path, &string_result));
+}
+
+TEST_F(RateLimitDescriptorAbiTest, FilterStateObjectSharedAndDestroyed) {
+  filter_state_object_destructor_calls = 0;
+  envoy_dynamic_module_type_module_buffer key{"envoy.test.memo", 15};
+  auto* object = new int(42);
+  EXPECT_TRUE(envoy_dynamic_module_callback_rate_limit_descriptor_set_filter_state_object(
+      contextPtr(), key, object, filterStateObjectDestructor));
+  EXPECT_EQ(object, envoy_dynamic_module_callback_rate_limit_descriptor_get_filter_state_object(
+                        contextPtr(), key));
+
+  stream_info_.filter_state_.reset();
+  EXPECT_EQ(1, filter_state_object_destructor_calls);
+}
+
+TEST_F(RateLimitDescriptorAbiTest, FilterStateObjectStoreFailureDestroysObject) {
+  filter_state_object_destructor_calls = 0;
+  stream_info_.filter_state_.reset();
+  envoy_dynamic_module_type_module_buffer key{"envoy.test.memo", 15};
+  EXPECT_FALSE(envoy_dynamic_module_callback_rate_limit_descriptor_set_filter_state_object(
+      contextPtr(), key, new int(42), filterStateObjectDestructor));
+  EXPECT_EQ(1, filter_state_object_destructor_calls);
+  EXPECT_EQ(nullptr, envoy_dynamic_module_callback_rate_limit_descriptor_get_filter_state_object(
+                         contextPtr(), key));
 }
 
 } // namespace

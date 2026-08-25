@@ -188,7 +188,7 @@ RateLimitPolicy::RateLimitPolicy(const ProtoRateLimit& config,
 }
 
 void RateLimitPolicy::populateDescriptors(const Http::RequestHeaderMap& headers,
-                                          const StreamInfo::StreamInfo& stream_info,
+                                          StreamInfo::StreamInfo& stream_info,
                                           const std::string& local_service_cluster,
                                           RateLimitDescriptors& descriptors) const {
   Envoy::RateLimit::Descriptor descriptor;
@@ -260,7 +260,7 @@ RateLimitConfig::RateLimitConfig(const Protobuf::RepeatedPtrField<ProtoRateLimit
 }
 
 void RateLimitConfig::populateDescriptors(const Http::RequestHeaderMap& headers,
-                                          const StreamInfo::StreamInfo& stream_info,
+                                          StreamInfo::StreamInfo& stream_info,
                                           const std::string& local_service_cluster,
                                           RateLimitDescriptors& descriptors,
                                           bool on_stream_done) const {

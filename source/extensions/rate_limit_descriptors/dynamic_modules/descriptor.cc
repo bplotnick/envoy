@@ -67,8 +67,9 @@ newDynamicModuleRateLimitDescriptor(const DynamicModuleRateLimitDescriptorProto&
 
 bool DynamicModuleRateLimitDescriptor::populateDescriptor(
     RateLimit::DescriptorEntry& descriptor_entry, const std::string& local_service_cluster,
-    const Http::RequestHeaderMap& headers, const StreamInfo::StreamInfo& info) const {
-  RateLimitDescriptorContext context{local_service_cluster, headers, info, {}};
+    const Http::RequestHeaderMap& headers, StreamInfo::StreamInfo& info) const {
+  RateLimitDescriptorContext context{
+      dynamicModuleSharedPtr(), local_service_cluster, headers, info, {}};
   if (!on_populate_(in_module_config_, static_cast<void*>(&context))) {
     return false;
   }
