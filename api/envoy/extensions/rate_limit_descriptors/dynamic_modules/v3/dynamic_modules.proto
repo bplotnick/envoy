@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package envoy.extensions.rate_limit_descriptors.dynamic_modules.v3;
+
+import "envoy/extensions/dynamic_modules/v3/dynamic_modules.proto";
+
+import "google/protobuf/any.proto";
+
+import "udpa/annotations/status.proto";
+import "validate/validate.proto";
+
+option java_package = "io.envoyproxy.envoy.extensions.rate_limit_descriptors.dynamic_modules.v3";
+option java_outer_classname = "DynamicModulesProto";
+option java_multiple_files = true;
+option go_package = "github.com/envoyproxy/go-control-plane/envoy/extensions/rate_limit_descriptors/dynamic_modules/v3;dynamic_modulesv3";
+option (udpa.annotations.file_status).package_version_status = ACTIVE;
+
+// [#protodoc-title: Dynamic Modules Rate Limit Descriptor]
+// [#extension: envoy.rate_limit_descriptors.dynamic_modules]
+
+// Configuration for a dynamic module rate limit descriptor producer. The module is invoked while
+// Envoy builds a rate limit descriptor and can use the local service cluster, request headers,
+// stream info attributes, and dynamic metadata to produce one descriptor entry.
+message DynamicModuleRateLimitDescriptor {
+  // Specifies the shared-object level configuration. This field is required.
+  //
+  // .. note::
+  //   This extension loads the module while the rate limit policy is configured, so it cannot wait
+  //   for an asynchronous fetch. A remote :ref:`module
+  //   <envoy_v3_api_field_extensions.dynamic_modules.v3.DynamicModuleConfig.module>` is therefore
+  //   accepted only when the module is already cached on disk, and is otherwise rejected. Setting
+  //   :ref:`nack_on_cache_miss
+  //   <envoy_v3_api_field_extensions.dynamic_modules.v3.DynamicModuleConfig.nack_on_cache_miss>` to
+  //   ``true`` makes the rejection start a background fetch so that a later update succeeds. Prefer
+  //   ``name`` or a local data source.
+  envoy.extensions.dynamic_modules.v3.DynamicModuleConfig dynamic_module_config = 1
+      [(validate.rules).message = {required: true}];
+
+  // The name for this descriptor producer configuration. If not specified, defaults to an empty
+  // string. A module can use this to select between multiple implementations.
+  string descriptor_name = 2;
+
+  // The configuration for the descriptor producer chosen by ``descriptor_name``. If not
+  // specified, an empty configuration is passed to the module.
+  //
+  // ``google.protobuf.Struct`` is serialized as JSON before passing it to the module.
+  // ``google.protobuf.BytesValue`` and ``google.protobuf.StringValue`` are passed directly without
+  // the wrapper.
+  google.protobuf.Any descriptor_config = 3;
+}

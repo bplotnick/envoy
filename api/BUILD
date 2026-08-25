@@ -402,6 +402,7 @@ proto_library(
         "//envoy/extensions/quic/crypto_stream/v3:pkg",
         "//envoy/extensions/quic/proof_source/v3:pkg",
         "//envoy/extensions/quic/server_preferred_address/v3:pkg",
+        "//envoy/extensions/rate_limit_descriptors/dynamic_modules/v3:pkg",
         "//envoy/extensions/rate_limit_descriptors/expr/v3:pkg",
         "//envoy/extensions/rate_limit_descriptors/jwt_claim/v3:pkg",
         "//envoy/extensions/rbac/audit_loggers/stream/v3:pkg",

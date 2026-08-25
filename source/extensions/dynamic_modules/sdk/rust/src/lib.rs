@@ -25,6 +25,7 @@ pub mod listener;
 pub mod load_balancer;
 pub mod matcher;
 pub mod network;
+pub mod rate_limit_descriptor;
 pub mod stats_sink;
 pub mod tracer;
 pub mod transport_socket;
@@ -683,6 +684,8 @@ macro_rules! declare_network_filter_init_functions {
 /// - `access_logger:` — [`NewAccessLoggerConfigFunction`] for access loggers
 /// - `formatter:` — [`NewFormatterConfigFunction`] for formatters
 /// - `cluster_specifier:` — [`NewClusterSpecifierConfigFunction`] for cluster specifiers
+/// - `rate_limit_descriptor:` — [`NewRateLimitDescriptorConfigFunction`] for rate limit descriptor
+///   producers
 /// - `stat_sink:` — [`NewStatSinkConfigFunction`] for stats sinks
 ///
 /// # Examples
@@ -901,6 +904,13 @@ macro_rules! declare_all_init_functions {
       envoy_proxy_dynamic_modules_rust_sdk::NEW_CLUSTER_SPECIFIER_CONFIG_FUNCTION,
       $fn,
       "NEW_CLUSTER_SPECIFIER_CONFIG_FUNCTION"
+    );
+  };
+  (@register rate_limit_descriptor : $fn:expr) => {
+    envoy_proxy_dynamic_modules_rust_sdk::set_factory_once!(
+      envoy_proxy_dynamic_modules_rust_sdk::NEW_RATE_LIMIT_DESCRIPTOR_CONFIG_FUNCTION,
+      $fn,
+      "NEW_RATE_LIMIT_DESCRIPTOR_CONFIG_FUNCTION"
     );
   };
   (@register stat_sink : $fn:expr) => {
@@ -1325,6 +1335,83 @@ macro_rules! declare_cluster_specifier_init_functions {
         }
       })) {
         ::std::result::Result::Ok(v) => v,
+        ::std::result::Result::Err(payload) => {
+          $crate::log_ffi_panic("envoy_dynamic_module_on_program_init", payload);
+          ::std::ptr::null()
+        },
+      }
+    }
+  };
+}
+
+// =================================================================================================
+// Rate Limit Descriptor Dynamic Module
+// =================================================================================================
+
+/// The function signature for creating a rate limit descriptor producer configuration.
+///
+/// The `name` is the value of `descriptor_name` and `config` contains the raw bytes from
+/// `descriptor_config`. Returning `None` causes Envoy to reject the descriptor configuration.
+pub type NewRateLimitDescriptorConfigFunction =
+  fn(
+    name: &str,
+    config: &[u8],
+  ) -> Option<Box<dyn rate_limit_descriptor::RateLimitDescriptorConfig>>;
+
+/// The global factory function for rate limit descriptor producer configurations.
+pub static NEW_RATE_LIMIT_DESCRIPTOR_CONFIG_FUNCTION: OnceLock<
+  NewRateLimitDescriptorConfigFunction,
+> = OnceLock::new();
+
+/// Declare the init functions for a rate limit descriptor producer dynamic module.
+///
+/// # Example
+///
+/// ```
+/// use envoy_proxy_dynamic_modules_rust_sdk::rate_limit_descriptor::*;
+/// use envoy_proxy_dynamic_modules_rust_sdk::*;
+///
+/// fn program_init() -> bool {
+///   true
+/// }
+///
+/// fn new_descriptor(
+///   _name: &str,
+///   _config: &[u8],
+/// ) -> Option<Box<dyn RateLimitDescriptorConfig>> {
+///   Some(Box::new(MyDescriptor {}))
+/// }
+///
+/// struct MyDescriptor {}
+///
+/// impl RateLimitDescriptorConfig for MyDescriptor {
+///   fn populate(&self, ctx: &mut RateLimitDescriptorContext) -> bool {
+///     ctx.set_descriptor_entry("account", "example");
+///     true
+///   }
+/// }
+///
+/// declare_rate_limit_descriptor_init_functions!(program_init, new_descriptor);
+/// ```
+#[macro_export]
+macro_rules! declare_rate_limit_descriptor_init_functions {
+  ($f:ident, $new_rate_limit_descriptor_config_fn:expr) => {
+    #[no_mangle]
+    pub extern "C" fn envoy_dynamic_module_on_program_init() -> *const ::std::os::raw::c_char {
+      match ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| {
+        envoy_proxy_dynamic_modules_rust_sdk::set_factory_once!(
+          envoy_proxy_dynamic_modules_rust_sdk::NEW_RATE_LIMIT_DESCRIPTOR_CONFIG_FUNCTION,
+          $new_rate_limit_descriptor_config_fn,
+          "NEW_RATE_LIMIT_DESCRIPTOR_CONFIG_FUNCTION"
+        );
+        if ($f()) {
+          envoy_proxy_dynamic_modules_rust_sdk::abi::envoy_dynamic_modules_abi_version.as_ptr()
+            as *const ::std::os::raw::c_char
+        } else {
+          ::std::ptr::null()
+        }
+      })) {
+        ::std::result::Result::Ok(value) => value,
         ::std::result::Result::Err(payload) => {
           $crate::log_ffi_panic("envoy_dynamic_module_on_program_init", payload);
           ::std::ptr::null()

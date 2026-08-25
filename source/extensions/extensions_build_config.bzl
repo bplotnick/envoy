@@ -435,6 +435,7 @@ EXTENSIONS = {
     # Rate limit descriptors
     #
 
+    "envoy.rate_limit_descriptors.dynamic_modules":     "//source/extensions/rate_limit_descriptors/dynamic_modules:config",
     "envoy.rate_limit_descriptors.expr":                "//source/extensions/rate_limit_descriptors/expr:config",
     "envoy.rate_limit_descriptors.jwt_claim":            "//source/extensions/rate_limit_descriptors/jwt_claim:config",
 

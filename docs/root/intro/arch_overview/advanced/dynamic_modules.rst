@@ -39,6 +39,7 @@ Currently, dynamic modules are supported at the following extension points:
 * As a :ref:`tracer <envoy_v3_api_msg_extensions.tracers.dynamic_modules.v3.DynamicModuleTracer>`.
 * As a :ref:`health checker <envoy_v3_api_msg_extensions.health_checkers.dynamic_modules.v3.DynamicModuleHealthCheck>`.
 * As a :ref:`cluster specifier <envoy_v3_api_msg_extensions.router.cluster_specifiers.dynamic_modules.v3.DynamicModuleClusterSpecifier>`.
+* As a :ref:`rate limit descriptor producer <envoy_v3_api_msg_extensions.rate_limit_descriptors.dynamic_modules.v3.DynamicModuleRateLimitDescriptor>`.
 
 There are a few design goals for the dynamic modules:
 

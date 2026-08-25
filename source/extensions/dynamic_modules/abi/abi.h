@@ -15052,6 +15052,222 @@ bool envoy_dynamic_module_callback_cluster_specifier_set_route_action_override(
     envoy_dynamic_module_type_cluster_specifier_context_envoy_ptr context_envoy_ptr,
     envoy_dynamic_module_type_module_buffer name);
 
+// ======================== Rate Limit Descriptor =============================
+
+// -----------------------------------------------------------------------------
+// Rate Limit Descriptor Types
+// -----------------------------------------------------------------------------
+
+/**
+ * envoy_dynamic_module_type_rate_limit_descriptor_config_envoy_ptr is a raw pointer to the Envoy
+ * configuration object for a dynamic module rate limit descriptor producer.
+ *
+ * OWNERSHIP: Envoy owns the pointer. The module must not free it or retain it after
+ * envoy_dynamic_module_on_rate_limit_descriptor_config_destroy is called.
+ */
+typedef void* envoy_dynamic_module_type_rate_limit_descriptor_config_envoy_ptr;
+
+/**
+ * envoy_dynamic_module_type_rate_limit_descriptor_config_module_ptr is a pointer to an in-module
+ * descriptor producer configuration created by
+ * envoy_dynamic_module_on_rate_limit_descriptor_config_new.
+ *
+ * OWNERSHIP: The module owns the pointer. Envoy treats it as opaque and returns it to the populate
+ * and destroy hooks.
+ */
+typedef const void* envoy_dynamic_module_type_rate_limit_descriptor_config_module_ptr;
+
+/**
+ * envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr is a raw pointer to the
+ * per-request descriptor production context.
+ *
+ * OWNERSHIP: Envoy owns the pointer. It is valid only for the duration of a single
+ * envoy_dynamic_module_on_rate_limit_descriptor_populate call. The module must not retain it.
+ */
+typedef void* envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr;
+
+// -----------------------------------------------------------------------------
+// Rate Limit Descriptor Event Hooks
+// -----------------------------------------------------------------------------
+
+/**
+ * envoy_dynamic_module_on_rate_limit_descriptor_config_new is called when a rate limit descriptor
+ * producer configuration is created.
+ *
+ * This hook is called on the main thread. The returned configuration can be used concurrently from
+ * multiple worker threads and must therefore be thread-safe.
+ *
+ * @param config_envoy_ptr is the pointer to the Envoy descriptor producer configuration object.
+ * @param descriptor_name is the descriptor implementation name. The buffer is owned by Envoy and
+ * is valid until the corresponding config destroy hook returns.
+ * @param descriptor_config is the configuration bytes. The buffer is owned by Envoy and is valid
+ * until the corresponding config destroy hook returns.
+ * @return envoy_dynamic_module_type_rate_limit_descriptor_config_module_ptr is the module-owned
+ * configuration. Returning nullptr rejects the Envoy configuration.
+ */
+envoy_dynamic_module_type_rate_limit_descriptor_config_module_ptr
+envoy_dynamic_module_on_rate_limit_descriptor_config_new(
+    envoy_dynamic_module_type_rate_limit_descriptor_config_envoy_ptr config_envoy_ptr,
+    envoy_dynamic_module_type_envoy_buffer descriptor_name,
+    envoy_dynamic_module_type_envoy_buffer descriptor_config);
+
+/**
+ * envoy_dynamic_module_on_rate_limit_descriptor_config_destroy is called when a rate limit
+ * descriptor producer configuration is destroyed.
+ *
+ * @param config_module_ptr is the module-owned configuration returned by the config new hook. The
+ * module must release it before returning.
+ */
+void envoy_dynamic_module_on_rate_limit_descriptor_config_destroy(
+    envoy_dynamic_module_type_rate_limit_descriptor_config_module_ptr config_module_ptr);
+
+/**
+ * envoy_dynamic_module_on_rate_limit_descriptor_populate is called while Envoy builds a rate limit
+ * descriptor for a request.
+ *
+ * The module can inspect the request through the rate limit descriptor callbacks and can set one
+ * key/value entry by calling
+ * envoy_dynamic_module_callback_rate_limit_descriptor_set_descriptor_entry. This hook can be
+ * called concurrently on worker threads.
+ *
+ * @param config_module_ptr is the module-owned descriptor producer configuration.
+ * @param context_envoy_ptr is the per-request descriptor production context.
+ * @return true to continue building the descriptor. Returning true without setting an entry skips
+ * this producer. Returning false aborts descriptor generation and prevents rate limiting for this
+ * policy entry.
+ */
+bool envoy_dynamic_module_on_rate_limit_descriptor_populate(
+    envoy_dynamic_module_type_rate_limit_descriptor_config_module_ptr config_module_ptr,
+    envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr context_envoy_ptr);
+
+// -----------------------------------------------------------------------------
+// Rate Limit Descriptor Callbacks - Request State
+// -----------------------------------------------------------------------------
+
+/**
+ * envoy_dynamic_module_callback_rate_limit_descriptor_get_local_service_cluster returns the local
+ * service cluster configured in Envoy.
+ *
+ * @param context_envoy_ptr is the per-request descriptor production context.
+ * @param result receives an Envoy-owned buffer valid only during the populate hook.
+ * @return true when the local service cluster is non-empty, false otherwise.
+ */
+bool envoy_dynamic_module_callback_rate_limit_descriptor_get_local_service_cluster(
+    envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr context_envoy_ptr,
+    envoy_dynamic_module_type_envoy_buffer* result);
+
+/**
+ * envoy_dynamic_module_callback_rate_limit_descriptor_get_request_headers_size returns the number
+ * of request header entries.
+ *
+ * @param context_envoy_ptr is the per-request descriptor production context.
+ * @return size_t is the number of request header entries.
+ */
+size_t envoy_dynamic_module_callback_rate_limit_descriptor_get_request_headers_size(
+    envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr context_envoy_ptr);
+
+/**
+ * envoy_dynamic_module_callback_rate_limit_descriptor_get_request_headers copies references to all
+ * request header entries into module-provided storage.
+ *
+ * @param context_envoy_ptr is the per-request descriptor production context.
+ * @param result_headers points to storage for exactly the number of entries returned by the size
+ * callback. The returned header buffers are owned by Envoy and valid only during the populate hook.
+ * @return true when the headers were written, false otherwise.
+ */
+bool envoy_dynamic_module_callback_rate_limit_descriptor_get_request_headers(
+    envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr context_envoy_ptr,
+    envoy_dynamic_module_type_envoy_http_header* result_headers);
+
+/**
+ * envoy_dynamic_module_callback_rate_limit_descriptor_get_request_header_value looks up one value
+ * for a request header name.
+ *
+ * @param context_envoy_ptr is the per-request descriptor production context.
+ * @param key is the module-owned header name.
+ * @param result receives an Envoy-owned value buffer valid only during the populate hook.
+ * @param index selects a value when the header occurs more than once.
+ * @param total_count_out receives the number of values for the key and may be nullptr.
+ * @return true when the indexed value exists, false otherwise.
+ */
+bool envoy_dynamic_module_callback_rate_limit_descriptor_get_request_header_value(
+    envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr context_envoy_ptr,
+    envoy_dynamic_module_type_module_buffer key, envoy_dynamic_module_type_envoy_buffer* result,
+    size_t index, size_t* total_count_out);
+
+/**
+ * envoy_dynamic_module_callback_rate_limit_descriptor_get_attribute_string gets a string stream
+ * info attribute.
+ *
+ * @param context_envoy_ptr is the per-request descriptor production context.
+ * @param attribute_id identifies the requested attribute.
+ * @param result receives an Envoy-owned buffer valid only during the populate hook.
+ * @return true when the attribute exists as a string, false otherwise.
+ */
+bool envoy_dynamic_module_callback_rate_limit_descriptor_get_attribute_string(
+    envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr context_envoy_ptr,
+    envoy_dynamic_module_type_attribute_id attribute_id,
+    envoy_dynamic_module_type_envoy_buffer* result);
+
+/**
+ * envoy_dynamic_module_callback_rate_limit_descriptor_get_attribute_int gets an integer stream
+ * info attribute.
+ *
+ * @param context_envoy_ptr is the per-request descriptor production context.
+ * @param attribute_id identifies the requested attribute.
+ * @param result receives the attribute value.
+ * @return true when the attribute exists as an integer, false otherwise.
+ */
+bool envoy_dynamic_module_callback_rate_limit_descriptor_get_attribute_int(
+    envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr context_envoy_ptr,
+    envoy_dynamic_module_type_attribute_id attribute_id, uint64_t* result);
+
+/**
+ * envoy_dynamic_module_callback_rate_limit_descriptor_get_attribute_bool gets a boolean stream
+ * info attribute.
+ *
+ * @param context_envoy_ptr is the per-request descriptor production context.
+ * @param attribute_id identifies the requested attribute.
+ * @param result receives the attribute value.
+ * @return true when the attribute exists as a boolean, false otherwise.
+ */
+bool envoy_dynamic_module_callback_rate_limit_descriptor_get_attribute_bool(
+    envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr context_envoy_ptr,
+    envoy_dynamic_module_type_attribute_id attribute_id, bool* result);
+
+/**
+ * envoy_dynamic_module_callback_rate_limit_descriptor_get_dynamic_metadata gets a string value
+ * from stream dynamic metadata.
+ *
+ * @param context_envoy_ptr is the per-request descriptor production context.
+ * @param filter_name is the module-owned metadata namespace.
+ * @param path is the module-owned dotted path within the namespace.
+ * @param result receives an Envoy-owned buffer valid only during the populate hook.
+ * @return true when the metadata value exists as a string, false otherwise.
+ */
+bool envoy_dynamic_module_callback_rate_limit_descriptor_get_dynamic_metadata(
+    envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr context_envoy_ptr,
+    envoy_dynamic_module_type_module_buffer filter_name,
+    envoy_dynamic_module_type_module_buffer path, envoy_dynamic_module_type_envoy_buffer* result);
+
+// -----------------------------------------------------------------------------
+// Rate Limit Descriptor Callbacks - Result
+// -----------------------------------------------------------------------------
+
+/**
+ * envoy_dynamic_module_callback_rate_limit_descriptor_set_descriptor_entry sets the key/value
+ * entry produced for the current request. A later call replaces the earlier entry.
+ *
+ * Envoy copies both buffers before returning.
+ *
+ * @param context_envoy_ptr is the per-request descriptor production context.
+ * @param key is the module-owned descriptor key.
+ * @param value is the module-owned descriptor value.
+ */
+void envoy_dynamic_module_callback_rate_limit_descriptor_set_descriptor_entry(
+    envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr context_envoy_ptr,
+    envoy_dynamic_module_type_module_buffer key, envoy_dynamic_module_type_module_buffer value);
+
 #ifdef __cplusplus
 }
 #endif

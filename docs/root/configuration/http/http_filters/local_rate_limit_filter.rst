@@ -108,6 +108,12 @@ limit actions descriptor entries. If there is no matching descriptor entries,
 the default token bucket is used. All the matched local descriptors will be
 sorted by tokens per second and try to consume tokens in order, in most cases
 if one of them is limited, the remaining descriptors will not consume their tokens.
+
+The :ref:`dynamic module rate limit descriptor
+<envoy_v3_api_msg_extensions.rate_limit_descriptors.dynamic_modules.v3.DynamicModuleRateLimitDescriptor>`
+can compute an action descriptor entry from the request headers, stream info, dynamic metadata,
+and the local service cluster.
+
 However, in some cases, it may not work, for example, we have two descriptors
 A and B, A is limited 3 requests per second, and B is limited 20 requests per 10 seconds.
 Obviously B is stricter than A (token per second), as a result, if we send requests

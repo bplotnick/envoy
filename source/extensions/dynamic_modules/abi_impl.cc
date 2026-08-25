@@ -2946,6 +2946,85 @@ __attribute__((weak)) void envoy_dynamic_module_callback_cluster_specifier_set_t
       "context");
 }
 
+__attribute__((weak)) bool envoy_dynamic_module_callback_rate_limit_descriptor_get_attribute_bool(
+    envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr,
+    envoy_dynamic_module_type_attribute_id, bool*) {
+  IS_ENVOY_BUG(
+      "envoy_dynamic_module_callback_rate_limit_descriptor_get_attribute_bool: not implemented "
+      "in this context");
+  return false;
+}
+
+__attribute__((weak)) bool envoy_dynamic_module_callback_rate_limit_descriptor_get_attribute_int(
+    envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr,
+    envoy_dynamic_module_type_attribute_id, uint64_t*) {
+  IS_ENVOY_BUG(
+      "envoy_dynamic_module_callback_rate_limit_descriptor_get_attribute_int: not implemented "
+      "in this context");
+  return false;
+}
+
+__attribute__((weak)) bool envoy_dynamic_module_callback_rate_limit_descriptor_get_attribute_string(
+    envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr,
+    envoy_dynamic_module_type_attribute_id, envoy_dynamic_module_type_envoy_buffer*) {
+  IS_ENVOY_BUG(
+      "envoy_dynamic_module_callback_rate_limit_descriptor_get_attribute_string: not implemented "
+      "in this context");
+  return false;
+}
+
+__attribute__((weak)) bool envoy_dynamic_module_callback_rate_limit_descriptor_get_dynamic_metadata(
+    envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr,
+    envoy_dynamic_module_type_module_buffer, envoy_dynamic_module_type_module_buffer,
+    envoy_dynamic_module_type_envoy_buffer*) {
+  IS_ENVOY_BUG(
+      "envoy_dynamic_module_callback_rate_limit_descriptor_get_dynamic_metadata: not implemented "
+      "in this context");
+  return false;
+}
+
+__attribute__((weak)) bool
+envoy_dynamic_module_callback_rate_limit_descriptor_get_local_service_cluster(
+    envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr,
+    envoy_dynamic_module_type_envoy_buffer*) {
+  IS_ENVOY_BUG("envoy_dynamic_module_callback_rate_limit_descriptor_get_local_service_cluster: "
+               "not implemented in this context");
+  return false;
+}
+
+__attribute__((weak)) bool
+envoy_dynamic_module_callback_rate_limit_descriptor_get_request_header_value(
+    envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr,
+    envoy_dynamic_module_type_module_buffer, envoy_dynamic_module_type_envoy_buffer*, size_t,
+    size_t*) {
+  IS_ENVOY_BUG("envoy_dynamic_module_callback_rate_limit_descriptor_get_request_header_value: not "
+               "implemented in this context");
+  return false;
+}
+
+__attribute__((weak)) bool envoy_dynamic_module_callback_rate_limit_descriptor_get_request_headers(
+    envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr,
+    envoy_dynamic_module_type_envoy_http_header*) {
+  IS_ENVOY_BUG("envoy_dynamic_module_callback_rate_limit_descriptor_get_request_headers: not "
+               "implemented in this context");
+  return false;
+}
+
+__attribute__((weak)) size_t
+envoy_dynamic_module_callback_rate_limit_descriptor_get_request_headers_size(
+    envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr) {
+  IS_ENVOY_BUG("envoy_dynamic_module_callback_rate_limit_descriptor_get_request_headers_size: not "
+               "implemented in this context");
+  return 0;
+}
+
+__attribute__((weak)) void envoy_dynamic_module_callback_rate_limit_descriptor_set_descriptor_entry(
+    envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr,
+    envoy_dynamic_module_type_module_buffer, envoy_dynamic_module_type_module_buffer) {
+  IS_ENVOY_BUG("envoy_dynamic_module_callback_rate_limit_descriptor_set_descriptor_entry: not "
+               "implemented in this context");
+}
+
 __attribute__((weak)) envoy_dynamic_module_type_access_log_type
 envoy_dynamic_module_callback_formatter_get_access_log_type(
     envoy_dynamic_module_type_formatter_context_envoy_ptr) {

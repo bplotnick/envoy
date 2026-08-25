@@ -17,6 +17,7 @@ package(default_visibility = [
     "//test/extensions/load_balancing_policies/dynamic_modules:__pkg__",
     "//test/extensions/matching/input_matchers/dynamic_modules:__pkg__",
     "//test/extensions/network/dns_resolver/hickory:__pkg__",
+    "//test/extensions/rate_limit_descriptors/dynamic_modules:__pkg__",
     "//test/extensions/router/cluster_specifiers/dynamic_modules:__pkg__",
     "//test/extensions/tracers/dynamic_modules:__pkg__",
     "//test/extensions/transport_sockets/dynamic_modules:__pkg__",
@@ -209,6 +210,18 @@ test_program(name = "matcher_missing_match")
 test_program(name = "matcher_missing_config_destroy")
 
 test_program(name = "matcher_check_headers")
+
+test_program(name = "rate_limit_descriptor_no_op")
+
+test_program(name = "rate_limit_descriptor_callbacks")
+
+test_program(name = "rate_limit_descriptor_config_new_fail")
+
+test_program(name = "rate_limit_descriptor_missing_config_new")
+
+test_program(name = "rate_limit_descriptor_missing_config_destroy")
+
+test_program(name = "rate_limit_descriptor_missing_populate")
 
 test_program(name = "cert_validator_no_op")
 

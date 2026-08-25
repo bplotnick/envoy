@@ -1447,6 +1447,13 @@ envoy.quic.crypto_stream.server.quiche:
   status: stable
   type_urls:
   - envoy.extensions.quic.crypto_stream.v3.CryptoServerStreamConfig
+envoy.rate_limit_descriptors.dynamic_modules:
+  categories:
+  - envoy.rate_limit_descriptors
+  security_posture: requires_trusted_downstream_and_upstream
+  status: alpha
+  type_urls:
+  - envoy.extensions.rate_limit_descriptors.dynamic_modules.v3.DynamicModuleRateLimitDescriptor
 envoy.rate_limit_descriptors.expr:
   categories:
   - envoy.rate_limit_descriptors

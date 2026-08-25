@@ -200,6 +200,8 @@
 /*/extensions/filters/common/local_ratelimit @mattklein123 @wbpcode
 # HTTP Kill Request
 /*/extensions/filters/http/kill_request @qqustc @yanavlasov
+# Dynamic modules rate limit descriptor
+/*/extensions/rate_limit_descriptors/dynamic_modules @bplotnick @wbpcode
 # Rate limit expression descriptor
 /*/extensions/rate_limit_descriptors/expr @kyessenov @cpakulski
 # Rate limit JWT claim descriptor
