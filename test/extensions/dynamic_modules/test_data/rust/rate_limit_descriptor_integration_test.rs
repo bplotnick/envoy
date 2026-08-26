@@ -42,15 +42,13 @@ impl RateLimitDescriptorConfig for TestDescriptor {
           .map(|value| String::from_utf8_lossy(value.as_slice()).into_owned())
           .unwrap_or_else(|| self.fallback.clone());
         let cached = Box::into_raw(Box::new(CachedValue(value.clone())));
-        if !unsafe {
+        let _ = unsafe {
           ctx.set_filter_state_object(
             CACHE_KEY,
             cached.cast::<std::ffi::c_void>(),
             destroy_cached_value,
           )
-        } {
-          return false;
-        }
+        };
         value
       },
     };

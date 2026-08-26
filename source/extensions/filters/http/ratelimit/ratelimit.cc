@@ -93,14 +93,15 @@ void Filter::populateRateLimitDescriptors(std::vector<Envoy::RateLimit::Descript
   // The the embedded rate limits is set in the typed_per_filter_config, use it and ignore the
   // rate limits of route.
   if (route_config_ != nullptr && route_config_->hasRateLimitConfigs()) {
-    route_config_->populateDescriptors(headers, callbacks_->streamInfo(), descriptors,
-                                       on_stream_done);
+    route_config_->populateDescriptorsWithMutableStreamInfo(headers, callbacks_->streamInfo(),
+                                                            descriptors, on_stream_done);
     return;
   }
 
   // Rate Limit config in typed_per_filter_config takes precedence over route's rate limit.
   if (config_->hasRateLimitConfigs()) {
-    config_->populateDescriptors(headers, callbacks_->streamInfo(), descriptors, on_stream_done);
+    config_->populateDescriptorsWithMutableStreamInfo(headers, callbacks_->streamInfo(),
+                                                      descriptors, on_stream_done);
     return;
   }
 
@@ -322,8 +323,9 @@ void Filter::populateRateLimitDescriptorsForPolicy(const Router::RateLimitPolicy
     }
     const bool apply_on_stream_done = rate_limit.applyOnStreamDone();
     if (on_stream_done == apply_on_stream_done) {
-      rate_limit.populateDescriptors(descriptors, config_->localInfo().clusterName(), headers,
-                                     callbacks_->streamInfo());
+      Router::populateDescriptorsWithMutableStreamInfo(rate_limit, descriptors,
+                                                       config_->localInfo().clusterName(), headers,
+                                                       callbacks_->streamInfo());
     }
   }
 }

@@ -111,7 +111,8 @@ TEST_F(DynamicModuleRateLimitDescriptorTest, RustSdkModuleProducesEntry) {
   auto descriptor = createDescriptor(std::move(module.value()), "rust-key", "fallback");
   Http::TestRequestHeaderMapImpl headers{{"x-rate-limit-value", "rust-value"}};
   RateLimit::DescriptorEntry entry;
-  EXPECT_TRUE(descriptor->populateDescriptor(entry, "local-cluster", headers, stream_info_));
+  EXPECT_TRUE(descriptor->populateDescriptorWithMutableStreamInfo(entry, "local-cluster", headers,
+                                                                  stream_info_));
   EXPECT_EQ("rust-key", entry.key_);
   EXPECT_EQ("rust-value", entry.value_);
 
@@ -124,8 +125,8 @@ TEST_F(DynamicModuleRateLimitDescriptorTest, RustSdkModuleProducesEntry) {
   auto second_descriptor =
       createDescriptor(std::move(second_module.value()), "rust-key", "fallback");
   RateLimit::DescriptorEntry second_entry;
-  EXPECT_TRUE(
-      second_descriptor->populateDescriptor(second_entry, "local-cluster", headers, stream_info_));
+  EXPECT_TRUE(second_descriptor->populateDescriptorWithMutableStreamInfo(
+      second_entry, "local-cluster", headers, stream_info_));
   EXPECT_EQ("rust-value", second_entry.value_);
 }
 

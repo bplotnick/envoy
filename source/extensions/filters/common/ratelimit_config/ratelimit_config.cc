@@ -188,13 +188,35 @@ RateLimitPolicy::RateLimitPolicy(const ProtoRateLimit& config,
 }
 
 void RateLimitPolicy::populateDescriptors(const Http::RequestHeaderMap& headers,
-                                          StreamInfo::StreamInfo& stream_info,
+                                          const StreamInfo::StreamInfo& stream_info,
                                           const std::string& local_service_cluster,
                                           RateLimitDescriptors& descriptors) const {
+  populateDescriptorsImpl(headers, stream_info, nullptr, local_service_cluster, descriptors);
+}
+
+void RateLimitPolicy::populateDescriptorsWithMutableStreamInfo(
+    const Http::RequestHeaderMap& headers, StreamInfo::StreamInfo& stream_info,
+    const std::string& local_service_cluster, RateLimitDescriptors& descriptors) const {
+  populateDescriptorsImpl(headers, stream_info, &stream_info, local_service_cluster, descriptors);
+}
+
+void RateLimitPolicy::populateDescriptorsImpl(const Http::RequestHeaderMap& headers,
+                                              const StreamInfo::StreamInfo& stream_info,
+                                              StreamInfo::StreamInfo* mutable_stream_info,
+                                              const std::string& local_service_cluster,
+                                              RateLimitDescriptors& descriptors) const {
   Envoy::RateLimit::Descriptor descriptor;
   for (const Envoy::RateLimit::DescriptorProducerPtr& action : actions_) {
     Envoy::RateLimit::DescriptorEntry entry;
-    if (!action->populateDescriptor(entry, local_service_cluster, headers, stream_info)) {
+    const auto* mutable_action =
+        dynamic_cast<const Envoy::RateLimit::DescriptorProducerWithMutableStreamInfo*>(
+            action.get());
+    const bool populated =
+        mutable_stream_info != nullptr && mutable_action != nullptr
+            ? mutable_action->populateDescriptorWithMutableStreamInfo(entry, local_service_cluster,
+                                                                      headers, *mutable_stream_info)
+            : action->populateDescriptor(entry, local_service_cluster, headers, stream_info);
+    if (!populated) {
       return;
     }
     if (!entry.key_.empty()) {
@@ -260,7 +282,7 @@ RateLimitConfig::RateLimitConfig(const Protobuf::RepeatedPtrField<ProtoRateLimit
 }
 
 void RateLimitConfig::populateDescriptors(const Http::RequestHeaderMap& headers,
-                                          StreamInfo::StreamInfo& stream_info,
+                                          const StreamInfo::StreamInfo& stream_info,
                                           const std::string& local_service_cluster,
                                           RateLimitDescriptors& descriptors,
                                           bool on_stream_done) const {
@@ -269,6 +291,19 @@ void RateLimitConfig::populateDescriptors(const Http::RequestHeaderMap& headers,
       continue;
     }
     generator.populateDescriptors(headers, stream_info, local_service_cluster, descriptors);
+  }
+}
+
+void RateLimitConfig::populateDescriptorsWithMutableStreamInfo(
+    const Http::RequestHeaderMap& headers, StreamInfo::StreamInfo& stream_info,
+    const std::string& local_service_cluster, RateLimitDescriptors& descriptors,
+    bool on_stream_done) const {
+  for (const RateLimitPolicy& generator : rate_limit_policies_) {
+    if (generator.applyOnStreamDone() != on_stream_done) {
+      continue;
+    }
+    generator.populateDescriptorsWithMutableStreamInfo(headers, stream_info, local_service_cluster,
+                                                       descriptors);
   }
 }
 

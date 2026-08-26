@@ -261,12 +261,12 @@ public:
   MOCK_METHOD(void, populateDescriptors,
               (std::vector<Envoy::RateLimit::Descriptor> & descriptors,
                const std::string& local_service_cluster, const Http::RequestHeaderMap& headers,
-               StreamInfo::StreamInfo& info),
+               const StreamInfo::StreamInfo& info),
               (const));
   MOCK_METHOD(void, populateLocalDescriptors,
               (std::vector<Envoy::RateLimit::LocalDescriptor> & descriptors,
                const std::string& local_service_cluster, const Http::RequestHeaderMap& headers,
-               StreamInfo::StreamInfo& info),
+               const StreamInfo::StreamInfo& info),
               (const));
   MOCK_METHOD(bool, applyOnStreamDone, (), (const));
 

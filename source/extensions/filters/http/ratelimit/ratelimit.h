@@ -122,12 +122,20 @@ public:
     ASSERT(rate_limit_config_ != nullptr);
     return !rate_limit_config_->empty();
   }
-  void populateDescriptors(const Http::RequestHeaderMap& headers, StreamInfo::StreamInfo& info,
+  void populateDescriptors(const Http::RequestHeaderMap& headers,
+                           const StreamInfo::StreamInfo& info,
                            Filters::Common::RateLimit::RateLimitDescriptors& descriptors,
                            bool on_stream_done) const {
     ASSERT(rate_limit_config_ != nullptr);
     rate_limit_config_->populateDescriptors(headers, info, local_info_.clusterName(), descriptors,
                                             on_stream_done);
+  }
+  void populateDescriptorsWithMutableStreamInfo(
+      const Http::RequestHeaderMap& headers, StreamInfo::StreamInfo& info,
+      Filters::Common::RateLimit::RateLimitDescriptors& descriptors, bool on_stream_done) const {
+    ASSERT(rate_limit_config_ != nullptr);
+    rate_limit_config_->populateDescriptorsWithMutableStreamInfo(
+        headers, info, local_info_.clusterName(), descriptors, on_stream_done);
   }
 
 private:
@@ -205,12 +213,20 @@ public:
     return !rate_limit_config_->empty();
   }
 
-  void populateDescriptors(const Http::RequestHeaderMap& headers, StreamInfo::StreamInfo& info,
+  void populateDescriptors(const Http::RequestHeaderMap& headers,
+                           const StreamInfo::StreamInfo& info,
                            Filters::Common::RateLimit::RateLimitDescriptors& descriptors,
                            bool on_stream_done) const {
     ASSERT(rate_limit_config_ != nullptr);
     rate_limit_config_->populateDescriptors(headers, info, local_info_.clusterName(), descriptors,
                                             on_stream_done);
+  }
+  void populateDescriptorsWithMutableStreamInfo(
+      const Http::RequestHeaderMap& headers, StreamInfo::StreamInfo& info,
+      Filters::Common::RateLimit::RateLimitDescriptors& descriptors, bool on_stream_done) const {
+    ASSERT(rate_limit_config_ != nullptr);
+    rate_limit_config_->populateDescriptorsWithMutableStreamInfo(
+        headers, info, local_info_.clusterName(), descriptors, on_stream_done);
   }
 
   std::string domain() const { return domain_; }

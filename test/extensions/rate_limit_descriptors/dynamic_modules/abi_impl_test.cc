@@ -31,8 +31,13 @@ public:
   NiceMock<StreamInfo::MockStreamInfo> stream_info_;
   DynamicModuleSharedPtr dynamic_module_{
       std::make_shared<Extensions::DynamicModules::DynamicModule>(static_cast<void*>(nullptr))};
-  RateLimitDescriptorContext context_{
-      dynamic_module_, local_service_cluster_, headers_, stream_info_, {}};
+  RateLimitDescriptorContext context_{dynamic_module_,
+                                      local_service_cluster_,
+                                      headers_,
+                                      stream_info_,
+                                      stream_info_.filter_state_.get(),
+                                      stream_info_.filter_state_.get(),
+                                      {}};
 };
 
 TEST_F(RateLimitDescriptorAbiTest, LocalServiceCluster) {
@@ -114,6 +119,8 @@ TEST_F(RateLimitDescriptorAbiTest, FilterStateObjectSharedAndDestroyed) {
 TEST_F(RateLimitDescriptorAbiTest, FilterStateObjectStoreFailureDestroysObject) {
   filter_state_object_destructor_calls = 0;
   stream_info_.filter_state_.reset();
+  context_.filter_state = nullptr;
+  context_.mutable_filter_state = nullptr;
   envoy_dynamic_module_type_module_buffer key{"envoy.test.memo", 15};
   EXPECT_FALSE(envoy_dynamic_module_callback_rate_limit_descriptor_set_filter_state_object(
       contextPtr(), key, new int(42), filterStateObjectDestructor));

@@ -67,9 +67,30 @@ newDynamicModuleRateLimitDescriptor(const DynamicModuleRateLimitDescriptorProto&
 
 bool DynamicModuleRateLimitDescriptor::populateDescriptor(
     RateLimit::DescriptorEntry& descriptor_entry, const std::string& local_service_cluster,
+    const Http::RequestHeaderMap& headers, const StreamInfo::StreamInfo& info) const {
+  return populateDescriptorImpl(descriptor_entry, local_service_cluster, headers, info, nullptr);
+}
+
+bool DynamicModuleRateLimitDescriptor::populateDescriptorWithMutableStreamInfo(
+    RateLimit::DescriptorEntry& descriptor_entry, const std::string& local_service_cluster,
     const Http::RequestHeaderMap& headers, StreamInfo::StreamInfo& info) const {
-  RateLimitDescriptorContext context{
-      dynamicModuleSharedPtr(), local_service_cluster, headers, info, {}};
+  return populateDescriptorImpl(descriptor_entry, local_service_cluster, headers, info,
+                                info.filterState().get());
+}
+
+bool DynamicModuleRateLimitDescriptor::populateDescriptorImpl(
+    RateLimit::DescriptorEntry& descriptor_entry, const std::string& local_service_cluster,
+    const Http::RequestHeaderMap& headers, const StreamInfo::StreamInfo& info,
+    StreamInfo::FilterState* mutable_filter_state) const {
+  const StreamInfo::FilterState* filter_state =
+      mutable_filter_state != nullptr ? mutable_filter_state : &info.filterState();
+  RateLimitDescriptorContext context{dynamicModuleSharedPtr(),
+                                     local_service_cluster,
+                                     headers,
+                                     info,
+                                     filter_state,
+                                     mutable_filter_state,
+                                     {}};
   if (!on_populate_(in_module_config_, static_cast<void*>(&context))) {
     return false;
   }

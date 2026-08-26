@@ -68,7 +68,7 @@ public:
   bool populateDescriptor(RateLimit::DescriptorEntry& descriptor_entry,
                           const std::string& local_service_cluster,
                           const Http::RequestHeaderMap& headers,
-                          StreamInfo::StreamInfo& info) const override;
+                          const StreamInfo::StreamInfo& info) const override;
 };
 
 /**
@@ -80,7 +80,7 @@ public:
   bool populateDescriptor(RateLimit::DescriptorEntry& descriptor_entry,
                           const std::string& local_service_cluster,
                           const Http::RequestHeaderMap& headers,
-                          StreamInfo::StreamInfo& info) const override;
+                          const StreamInfo::StreamInfo& info) const override;
 };
 
 /**
@@ -96,7 +96,7 @@ public:
   bool populateDescriptor(RateLimit::DescriptorEntry& descriptor_entry,
                           const std::string& local_service_cluster,
                           const Http::RequestHeaderMap& headers,
-                          StreamInfo::StreamInfo& info) const override;
+                          const StreamInfo::StreamInfo& info) const override;
 
 private:
   const Http::LowerCaseString header_name_;
@@ -113,7 +113,7 @@ public:
   bool populateDescriptor(RateLimit::DescriptorEntry& descriptor_entry,
                           const std::string& local_service_cluster,
                           const Http::RequestHeaderMap& headers,
-                          StreamInfo::StreamInfo& info) const override;
+                          const StreamInfo::StreamInfo& info) const override;
 };
 
 /**
@@ -130,7 +130,7 @@ public:
   bool populateDescriptor(RateLimit::DescriptorEntry& descriptor_entry,
                           const std::string& local_service_cluster,
                           const Http::RequestHeaderMap& headers,
-                          StreamInfo::StreamInfo& info) const override;
+                          const StreamInfo::StreamInfo& info) const override;
 
 private:
   const uint32_t v4_prefix_mask_len_;
@@ -149,7 +149,7 @@ public:
   bool populateDescriptor(RateLimit::DescriptorEntry& descriptor_entry,
                           const std::string& local_service_cluster,
                           const Http::RequestHeaderMap& headers,
-                          StreamInfo::StreamInfo& info) const override;
+                          const StreamInfo::StreamInfo& info) const override;
 
 private:
   const std::string descriptor_value_;
@@ -171,7 +171,7 @@ public:
   bool populateDescriptor(RateLimit::DescriptorEntry& descriptor_entry,
                           const std::string& local_service_cluster,
                           const Http::RequestHeaderMap& headers,
-                          StreamInfo::StreamInfo& info) const override;
+                          const StreamInfo::StreamInfo& info) const override;
 
 private:
   const Envoy::Config::MetadataKey metadata_key_;
@@ -192,7 +192,7 @@ public:
   bool populateDescriptor(RateLimit::DescriptorEntry& descriptor_entry,
                           const std::string& local_service_cluster,
                           const Http::RequestHeaderMap& headers,
-                          StreamInfo::StreamInfo& info) const override;
+                          const StreamInfo::StreamInfo& info) const override;
 
 private:
   const std::string query_param_name_;
@@ -214,7 +214,7 @@ public:
   bool populateDescriptor(RateLimit::DescriptorEntry& descriptor_entry,
                           const std::string& local_service_cluster,
                           const Http::RequestHeaderMap& headers,
-                          StreamInfo::StreamInfo& info) const override;
+                          const StreamInfo::StreamInfo& info) const override;
 
 private:
   const std::string descriptor_value_;
@@ -239,7 +239,7 @@ public:
   bool populateDescriptor(RateLimit::DescriptorEntry& descriptor_entry,
                           const std::string& local_service_cluster,
                           const Http::RequestHeaderMap& headers,
-                          StreamInfo::StreamInfo& info) const override;
+                          const StreamInfo::StreamInfo& info) const override;
 
   std::vector<ConfigUtility::QueryParameterMatcherPtr> buildQueryParameterMatcherVector(
       const Protobuf::RepeatedPtrField<envoy::config::route::v3::QueryParameterMatcher>&
@@ -268,7 +268,7 @@ public:
   bool populateDescriptor(RateLimit::DescriptorEntry& descriptor_entry,
                           const std::string& local_service_cluster,
                           const Http::RequestHeaderMap& headers,
-                          StreamInfo::StreamInfo& info) const override;
+                          const StreamInfo::StreamInfo& info) const override;
 
 private:
   const std::string descriptor_key_;
@@ -296,7 +296,7 @@ public:
   // Ratelimit::DescriptorProducer
   bool populateDescriptor(RateLimit::DescriptorEntry& descriptor_entry, const std::string&,
                           const Http::RequestHeaderMap& headers,
-                          StreamInfo::StreamInfo& info) const override;
+                          const StreamInfo::StreamInfo& info) const override;
 
 private:
   const std::string descriptor_key_;
@@ -306,7 +306,8 @@ private:
 /*
  * Implementation of RateLimitPolicyEntry that holds the action for the configuration.
  */
-class RateLimitPolicyEntryImpl : public RateLimitPolicyEntry {
+class RateLimitPolicyEntryImpl : public RateLimitPolicyEntry,
+                                 public RateLimitPolicyEntryWithMutableStreamInfo {
 public:
   RateLimitPolicyEntryImpl(const envoy::config::route::v3::RateLimit& config,
                            Server::Configuration::CommonFactoryContext& context,
@@ -317,11 +318,22 @@ public:
   const std::string& disableKey() const override { return disable_key_; }
   void populateDescriptors(std::vector<Envoy::RateLimit::Descriptor>& descriptors,
                            const std::string& local_service_cluster, const Http::RequestHeaderMap&,
-                           StreamInfo::StreamInfo& info) const override;
+                           const StreamInfo::StreamInfo& info) const override;
   void populateLocalDescriptors(std::vector<Envoy::RateLimit::LocalDescriptor>& descriptors,
                                 const std::string& local_service_cluster,
                                 const Http::RequestHeaderMap&,
-                                StreamInfo::StreamInfo& info) const override;
+                                const StreamInfo::StreamInfo& info) const override;
+
+  // Router::RateLimitPolicyEntryWithMutableStreamInfo
+  void
+  populateDescriptorsWithMutableStreamInfo(std::vector<Envoy::RateLimit::Descriptor>& descriptors,
+                                           const std::string& local_service_cluster,
+                                           const Http::RequestHeaderMap& headers,
+                                           StreamInfo::StreamInfo& info) const override;
+  void populateLocalDescriptorsWithMutableStreamInfo(
+      std::vector<Envoy::RateLimit::LocalDescriptor>& descriptors,
+      const std::string& local_service_cluster, const Http::RequestHeaderMap& headers,
+      StreamInfo::StreamInfo& info) const override;
   bool applyOnStreamDone() const override { return apply_on_stream_done_; }
 
 private:

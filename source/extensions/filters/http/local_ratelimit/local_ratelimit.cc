@@ -175,7 +175,8 @@ Http::FilterHeadersStatus Filter::decodeHeaders(Http::RequestHeaderMap& headers,
   std::vector<RateLimit::Descriptor> descriptors;
   if (used_config_->hasDescriptors()) {
     if (used_config_->hasRateLimitConfigs()) {
-      used_config_->populateDescriptors(headers, decoder_callbacks_->streamInfo(), descriptors);
+      used_config_->populateDescriptorsWithMutableStreamInfo(
+          headers, decoder_callbacks_->streamInfo(), descriptors);
     } else {
       populateDescriptors(descriptors, headers);
     }
@@ -320,8 +321,9 @@ void Filter::populateDescriptors(const Router::RateLimitPolicy& rate_limit_polic
     if (!disable_key.empty()) {
       continue;
     }
-    rate_limit.populateDescriptors(descriptors, used_config_->localInfo().clusterName(), headers,
-                                   decoder_callbacks_->streamInfo());
+    Router::populateDescriptorsWithMutableStreamInfo(rate_limit, descriptors,
+                                                     used_config_->localInfo().clusterName(),
+                                                     headers, decoder_callbacks_->streamInfo());
   }
 }
 

@@ -126,7 +126,7 @@ bool envoy_dynamic_module_callback_rate_limit_descriptor_set_filter_state_object
       destructor(module_object);
     }
   };
-  const auto& filter_state = context->stream_info.filterState();
+  auto* filter_state = context->mutable_filter_state;
   if (filter_state == nullptr) {
     free_object();
     return false;
@@ -147,13 +147,13 @@ envoy_dynamic_module_callback_rate_limit_descriptor_get_filter_state_object(
     envoy_dynamic_module_type_rate_limit_descriptor_context_envoy_ptr context_envoy_ptr,
     envoy_dynamic_module_type_module_buffer key) {
   auto* context = rateLimitDescriptorContext(context_envoy_ptr);
-  const auto& filter_state = context->stream_info.filterState();
-  if (filter_state == nullptr) {
+  if (context->filter_state == nullptr) {
     return nullptr;
   }
   const absl::string_view key_view(key.ptr, key.length);
-  auto* stored =
-      filter_state->getDataMutable<DynamicModuleRateLimitDescriptorFilterStateObject>(key_view);
+  const auto* stored =
+      context->filter_state->getDataReadOnly<DynamicModuleRateLimitDescriptorFilterStateObject>(
+          key_view);
   if (stored == nullptr) {
     return nullptr;
   }

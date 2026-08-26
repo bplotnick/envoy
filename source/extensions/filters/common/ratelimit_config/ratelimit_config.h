@@ -23,13 +23,24 @@ public:
                   Server::Configuration::CommonFactoryContext& context,
                   absl::Status& creation_status, bool no_limit = true);
 
-  void populateDescriptors(const Http::RequestHeaderMap& headers, StreamInfo::StreamInfo& info,
+  void populateDescriptors(const Http::RequestHeaderMap& headers,
+                           const StreamInfo::StreamInfo& info,
                            const std::string& local_service_cluster,
                            RateLimitDescriptors& descriptors) const;
+  void populateDescriptorsWithMutableStreamInfo(const Http::RequestHeaderMap& headers,
+                                                StreamInfo::StreamInfo& info,
+                                                const std::string& local_service_cluster,
+                                                RateLimitDescriptors& descriptors) const;
 
   bool applyOnStreamDone() const { return apply_on_stream_done_; }
 
 private:
+  void populateDescriptorsImpl(const Http::RequestHeaderMap& headers,
+                               const StreamInfo::StreamInfo& info,
+                               StreamInfo::StreamInfo* mutable_info,
+                               const std::string& local_service_cluster,
+                               RateLimitDescriptors& descriptors) const;
+
   const bool apply_on_stream_done_ = false;
   const Envoy::RateLimit::XRateLimitOption x_ratelimit_option_{};
   Formatter::FormatterProviderPtr hits_addend_provider_;
@@ -49,9 +60,15 @@ public:
 
   size_t size() const { return rate_limit_policies_.size(); }
 
-  void populateDescriptors(const Http::RequestHeaderMap& headers, StreamInfo::StreamInfo& info,
+  void populateDescriptors(const Http::RequestHeaderMap& headers,
+                           const StreamInfo::StreamInfo& info,
                            const std::string& local_service_cluster,
                            RateLimitDescriptors& descriptors, bool on_stream_done = false) const;
+  void populateDescriptorsWithMutableStreamInfo(const Http::RequestHeaderMap& headers,
+                                                StreamInfo::StreamInfo& info,
+                                                const std::string& local_service_cluster,
+                                                RateLimitDescriptors& descriptors,
+                                                bool on_stream_done = false) const;
 
 private:
   std::vector<RateLimitPolicy> rate_limit_policies_;

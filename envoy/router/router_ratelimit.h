@@ -63,7 +63,7 @@ public:
   virtual void populateDescriptors(std::vector<RateLimit::Descriptor>& descriptors,
                                    const std::string& local_service_cluster,
                                    const Http::RequestHeaderMap& headers,
-                                   StreamInfo::StreamInfo& info) const PURE;
+                                   const StreamInfo::StreamInfo& info) const PURE;
 
   /**
    * Potentially populate the local descriptor array with new descriptors to query.
@@ -75,8 +75,58 @@ public:
   virtual void populateLocalDescriptors(std::vector<RateLimit::LocalDescriptor>& descriptors,
                                         const std::string& local_service_cluster,
                                         const Http::RequestHeaderMap& headers,
-                                        StreamInfo::StreamInfo& info) const PURE;
+                                        const StreamInfo::StreamInfo& info) const PURE;
 };
+
+/**
+ * Optional interface for rate limit policy entries whose descriptor producers need mutable stream
+ * info. Existing RateLimitPolicyEntry implementations remain source compatible.
+ */
+class RateLimitPolicyEntryWithMutableStreamInfo {
+public:
+  virtual ~RateLimitPolicyEntryWithMutableStreamInfo() = default;
+
+  virtual void populateDescriptorsWithMutableStreamInfo(
+      std::vector<RateLimit::Descriptor>& descriptors, const std::string& local_service_cluster,
+      const Http::RequestHeaderMap& headers, StreamInfo::StreamInfo& info) const PURE;
+
+  virtual void populateLocalDescriptorsWithMutableStreamInfo(
+      std::vector<RateLimit::LocalDescriptor>& descriptors,
+      const std::string& local_service_cluster, const Http::RequestHeaderMap& headers,
+      StreamInfo::StreamInfo& info) const PURE;
+};
+
+/**
+ * Populates descriptors through the mutable interface when supported, falling back to the
+ * source-compatible const interface otherwise.
+ */
+inline void populateDescriptorsWithMutableStreamInfo(
+    const RateLimitPolicyEntry& entry, std::vector<RateLimit::Descriptor>& descriptors,
+    const std::string& local_service_cluster, const Http::RequestHeaderMap& headers,
+    StreamInfo::StreamInfo& info) {
+  const auto* mutable_entry =
+      dynamic_cast<const RateLimitPolicyEntryWithMutableStreamInfo*>(&entry);
+  if (mutable_entry != nullptr) {
+    mutable_entry->populateDescriptorsWithMutableStreamInfo(descriptors, local_service_cluster,
+                                                            headers, info);
+  } else {
+    entry.populateDescriptors(descriptors, local_service_cluster, headers, info);
+  }
+}
+
+inline void populateLocalDescriptorsWithMutableStreamInfo(
+    const RateLimitPolicyEntry& entry, std::vector<RateLimit::LocalDescriptor>& descriptors,
+    const std::string& local_service_cluster, const Http::RequestHeaderMap& headers,
+    StreamInfo::StreamInfo& info) {
+  const auto* mutable_entry =
+      dynamic_cast<const RateLimitPolicyEntryWithMutableStreamInfo*>(&entry);
+  if (mutable_entry != nullptr) {
+    mutable_entry->populateLocalDescriptorsWithMutableStreamInfo(descriptors, local_service_cluster,
+                                                                 headers, info);
+  } else {
+    entry.populateLocalDescriptors(descriptors, local_service_cluster, headers, info);
+  }
+}
 
 /**
  * Rate limiting policy.
