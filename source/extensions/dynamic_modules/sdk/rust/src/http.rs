@@ -16,12 +16,12 @@ use std::rc::Rc;
 
 /// An owned raw typed dynamic metadata value.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DynamicTypedMetadata {
+pub struct TypedDynamicMetadata {
   type_url: String,
   value: Vec<u8>,
 }
 
-impl DynamicTypedMetadata {
+impl TypedDynamicMetadata {
   /// Create a typed dynamic metadata value from a protobuf type URL and encoded message payload.
   pub fn new(type_url: String, value: Vec<u8>) -> Self {
     Self { type_url, value }
@@ -39,7 +39,7 @@ impl DynamicTypedMetadata {
 }
 
 /// A Rust type that can be decoded from typed dynamic metadata.
-pub trait DynamicTypedMetadataMessage: Sized {
+pub trait TypedDynamicMetadataMessage: Sized {
   /// The complete protobuf type URL expected for this type.
   const TYPE_URL: &'static str;
 
@@ -1317,8 +1317,8 @@ pub trait EnvoyHttpFilter {
   ///
   /// Returns `None` if the dynamic metadata is not accessible or the namespace does not exist.
   /// Most callers should prefer
-  /// [`EnvoyHttpFilterDynamicTypedMetadataExt::get_dynamic_typed_metadata`].
-  fn get_dynamic_typed_metadata_raw(&self, namespace: &str) -> Option<DynamicTypedMetadata>;
+  /// [`EnvoyHttpFilterTypedDynamicMetadataExt::get_dynamic_typed_metadata`].
+  fn get_dynamic_typed_metadata_raw(&self, namespace: &str) -> Option<TypedDynamicMetadata>;
 
   /// Get the bool-typed metadata value with the given key.
   /// Use the `source` parameter to specify which metadata to use.
@@ -2178,19 +2178,19 @@ pub trait EnvoyHttpFilter {
 ///
 /// This is an extension trait so the generic method does not make [`EnvoyHttpFilter`] incompatible
 /// with trait objects.
-pub trait EnvoyHttpFilterDynamicTypedMetadataExt {
+pub trait EnvoyHttpFilterTypedDynamicMetadataExt {
   /// Decode a typed dynamic metadata namespace as `T`.
   ///
   /// Returns `None` when the namespace is absent, its type URL does not match `T`, or its payload
   /// cannot be decoded.
-  fn get_dynamic_typed_metadata<T: DynamicTypedMetadataMessage>(
+  fn get_dynamic_typed_metadata<T: TypedDynamicMetadataMessage>(
     &self,
     namespace: &str,
   ) -> Option<T>;
 }
 
-impl<F: EnvoyHttpFilter + ?Sized> EnvoyHttpFilterDynamicTypedMetadataExt for F {
-  fn get_dynamic_typed_metadata<T: DynamicTypedMetadataMessage>(
+impl<F: EnvoyHttpFilter + ?Sized> EnvoyHttpFilterTypedDynamicMetadataExt for F {
+  fn get_dynamic_typed_metadata<T: TypedDynamicMetadataMessage>(
     &self,
     namespace: &str,
   ) -> Option<T> {
@@ -2910,7 +2910,7 @@ impl EnvoyHttpFilter for EnvoyHttpFilterImpl {
     }
   }
 
-  fn get_dynamic_typed_metadata_raw(&self, namespace: &str) -> Option<DynamicTypedMetadata> {
+  fn get_dynamic_typed_metadata_raw(&self, namespace: &str) -> Option<TypedDynamicMetadata> {
     let mut type_url = abi::envoy_dynamic_module_type_envoy_buffer {
       ptr: std::ptr::null(),
       length: 0,
@@ -2933,7 +2933,7 @@ impl EnvoyHttpFilter for EnvoyHttpFilterImpl {
     let type_url = unsafe { EnvoyBuffer::new_from_raw(type_url.ptr as *const _, type_url.length) };
     let type_url = String::from_utf8(type_url.as_slice().to_vec()).ok()?;
     let value = unsafe { EnvoyBuffer::new_from_raw(value.ptr as *const _, value.length) };
-    Some(DynamicTypedMetadata::new(
+    Some(TypedDynamicMetadata::new(
       type_url,
       value.as_slice().to_vec(),
     ))

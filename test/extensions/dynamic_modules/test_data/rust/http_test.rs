@@ -349,7 +349,7 @@ fn test_dynamic_metadata_callbacks_on_response_body() {
     .expect_get_dynamic_typed_metadata_raw()
     .withf(|ns| ns == "ns_req_header_typed")
     .returning(|_| {
-      Some(DynamicTypedMetadata::new(
+      Some(TypedDynamicMetadata::new(
         "t/x".to_string(),
         vec![0x01, 0x02],
       ))
@@ -653,7 +653,7 @@ fn test_typed_dynamic_metadata_type_safety() {
     .withf(|ns| ns == "missing")
     .returning(|_| None)
     .once();
-  let missing = EnvoyHttpFilterDynamicTypedMetadataExt::get_dynamic_typed_metadata::<
+  let missing = EnvoyHttpFilterTypedDynamicMetadataExt::get_dynamic_typed_metadata::<
     TestTypedMetadata,
   >(&envoy_filter, "missing");
   assert!(missing.is_none());
@@ -662,13 +662,13 @@ fn test_typed_dynamic_metadata_type_safety() {
     .expect_get_dynamic_typed_metadata_raw()
     .withf(|ns| ns == "wrong_type")
     .returning(|_| {
-      Some(DynamicTypedMetadata::new(
+      Some(TypedDynamicMetadata::new(
         "type.example/Other".to_string(),
         vec![0x01, 0x02],
       ))
     })
     .once();
-  let wrong_type = EnvoyHttpFilterDynamicTypedMetadataExt::get_dynamic_typed_metadata::<
+  let wrong_type = EnvoyHttpFilterTypedDynamicMetadataExt::get_dynamic_typed_metadata::<
     TestTypedMetadata,
   >(&envoy_filter, "wrong_type");
   assert!(wrong_type.is_none());

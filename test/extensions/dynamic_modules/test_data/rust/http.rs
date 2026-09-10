@@ -810,7 +810,7 @@ struct TestTypedMetadata {
   value: Vec<u8>,
 }
 
-impl DynamicTypedMetadataMessage for TestTypedMetadata {
+impl TypedDynamicMetadataMessage for TestTypedMetadata {
   const TYPE_URL: &'static str = "t/x";
 
   fn decode(value: &[u8]) -> Option<Self> {
@@ -879,7 +879,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for DynamicMetadataCallbacksFilter {
       "ns_req_header_typed",
       &[0x0a, 0x03, 0x74, 0x2f, 0x78, 0x12, 0x02, 0x01, 0x02],
     );
-    let typed_metadata = EnvoyHttpFilterDynamicTypedMetadataExt::get_dynamic_typed_metadata::<
+    let typed_metadata = EnvoyHttpFilterTypedDynamicMetadataExt::get_dynamic_typed_metadata::<
       TestTypedMetadata,
     >(envoy_filter, "ns_req_header_typed")
     .expect("typed dynamic metadata must exist");

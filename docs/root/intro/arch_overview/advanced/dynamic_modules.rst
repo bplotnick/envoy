@@ -103,9 +103,9 @@ Typed dynamic metadata (Rust SDK)
 ---------------------------------
 
 HTTP filter modules can read typed dynamic metadata without handling Envoy-owned buffers. A module
-implements ``DynamicTypedMetadataMessage`` for its protobuf type, declaring the expected
+implements ``TypedDynamicMetadataMessage`` for its protobuf type, declaring the expected
 ``google.protobuf.Any`` type URL and how to decode the message payload. It can then call
-``EnvoyHttpFilterDynamicTypedMetadataExt::get_dynamic_typed_metadata`` to validate the type URL and
+``EnvoyHttpFilterTypedDynamicMetadataExt::get_dynamic_typed_metadata`` to validate the type URL and
 return the decoded Rust type. The method returns ``None`` if the namespace is absent, the type URL
 does not match, or decoding fails.
 
