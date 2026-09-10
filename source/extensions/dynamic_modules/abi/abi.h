@@ -2203,6 +2203,27 @@ void envoy_dynamic_module_callback_http_set_dynamic_typed_metadata(
     envoy_dynamic_module_type_module_buffer serialized_any);
 
 /**
+ * envoy_dynamic_module_callback_http_get_dynamic_typed_metadata is called by the module to get an
+ * entire typed dynamic metadata namespace. If the dynamic metadata is not accessible or the
+ * namespace does not exist, this returns false.
+ *
+ * @param filter_envoy_ptr is the pointer to the DynamicModuleHttpFilter object of the
+ * corresponding HTTP filter.
+ * @param ns is the namespace of the typed dynamic metadata.
+ * @param type_url is the pointer to the variable where the google.protobuf.Any type URL will be
+ * stored.
+ * @param value is the pointer to the variable where the google.protobuf.Any value will be stored.
+ * @return true if the operation is successful, false otherwise.
+ *
+ * The buffers stored in type_url and value are owned by Envoy and are guaranteed to be valid until
+ * the end of the current event hook unless a typed dynamic metadata setter callback is called.
+ */
+bool envoy_dynamic_module_callback_http_get_dynamic_typed_metadata(
+    envoy_dynamic_module_type_http_filter_envoy_ptr filter_envoy_ptr,
+    envoy_dynamic_module_type_module_buffer ns, envoy_dynamic_module_type_envoy_buffer* type_url,
+    envoy_dynamic_module_type_envoy_buffer* value);
+
+/**
  * envoy_dynamic_module_callback_http_get_metadata_string is called by the module to get
  * the string value of the dynamic metadata with the given namespace and key. If the metadata is not
  * accessible, the namespace does not exist, the key does not exist or the value is not a string,

@@ -805,6 +805,21 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for DynamicMetadataCallbacksFil
 /// A HTTP filter that implements [`envoy_proxy_dynamic_modules_rust_sdk::HttpFilter`].
 struct DynamicMetadataCallbacksFilter {}
 
+#[derive(Debug, Eq, PartialEq)]
+struct TestTypedMetadata {
+  value: Vec<u8>,
+}
+
+impl DynamicTypedMetadataMessage for TestTypedMetadata {
+  const TYPE_URL: &'static str = "t/x";
+
+  fn decode(value: &[u8]) -> Option<Self> {
+    Some(Self {
+      value: value.to_vec(),
+    })
+  }
+}
+
 impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for DynamicMetadataCallbacksFilter {
   fn on_request_headers(
     &self,
@@ -864,8 +879,13 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for DynamicMetadataCallbacksFilter {
       "ns_req_header_typed",
       &[0x0a, 0x03, 0x74, 0x2f, 0x78, 0x12, 0x02, 0x01, 0x02],
     );
+    let typed_metadata = EnvoyHttpFilterDynamicTypedMetadataExt::get_dynamic_typed_metadata::<
+      TestTypedMetadata,
+    >(envoy_filter, "ns_req_header_typed")
+    .expect("typed dynamic metadata must exist");
+    assert_eq!(typed_metadata.value, &[0x01, 0x02]);
 
-    // Try getting metadata from rotuer cluster and host.
+    // Try getting metadata from route, cluster, and host.
     let metadata = envoy_filter.get_metadata_string(
       abi::envoy_dynamic_module_type_metadata_source::Route,
       "metadata",

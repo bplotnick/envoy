@@ -894,6 +894,13 @@ TEST(ABIImpl, SetDynamicMetadataStruct) {
 TEST(ABIImpl, SetDynamicTypedMetadata) {
   Stats::SymbolTableImpl symbol_table;
   DynamicModuleHttpFilter filter{nullptr, symbol_table, 0};
+
+  const std::string ns = "foo";
+  envoy_dynamic_module_type_envoy_buffer type_url = {nullptr, 0};
+  envoy_dynamic_module_type_envoy_buffer value = {nullptr, 0};
+  EXPECT_FALSE(envoy_dynamic_module_callback_http_get_dynamic_typed_metadata(
+      &filter, {ns.data(), ns.size()}, &type_url, &value));
+
   NiceMock<Http::MockStreamDecoderFilterCallbacks> callbacks;
   NiceMock<StreamInfo::MockStreamInfo> stream_info;
   EXPECT_CALL(callbacks, streamInfo()).WillRepeatedly(testing::ReturnRef(stream_info));
@@ -903,7 +910,8 @@ TEST(ABIImpl, SetDynamicTypedMetadata) {
       .WillRepeatedly(testing::ReturnRef(metadata));
   filter.setDecoderFilterCallbacks(callbacks);
 
-  const std::string ns = "foo";
+  EXPECT_FALSE(envoy_dynamic_module_callback_http_get_dynamic_typed_metadata(
+      &filter, {ns.data(), ns.size()}, &type_url, &value));
 
   // A packed Any round-trips into typed_filter_metadata with its type_url preserved.
   Protobuf::StringValue payload;
@@ -919,6 +927,10 @@ TEST(ABIImpl, SetDynamicTypedMetadata) {
   Protobuf::StringValue unpacked;
   ASSERT_TRUE(metadata.typed_filter_metadata().at(ns).UnpackTo(&unpacked));
   EXPECT_EQ(unpacked.value(), "hello");
+  ASSERT_TRUE(envoy_dynamic_module_callback_http_get_dynamic_typed_metadata(
+      &filter, {ns.data(), ns.size()}, &type_url, &value));
+  EXPECT_EQ(absl::string_view(type_url.ptr, type_url.length), any.type_url());
+  EXPECT_EQ(absl::string_view(value.ptr, value.length), any.value());
 
   // A buffer that does not parse as a google.protobuf.Any is a no-op (wire type 7 is invalid).
   const std::string garbage("\x0f", 1);

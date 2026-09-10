@@ -4787,6 +4787,14 @@ __attribute__((weak)) void envoy_dynamic_module_callback_http_set_dynamic_typed_
                "implemented in this context");
 }
 
+__attribute__((weak)) bool envoy_dynamic_module_callback_http_get_dynamic_typed_metadata(
+    envoy_dynamic_module_type_http_filter_envoy_ptr, envoy_dynamic_module_type_module_buffer,
+    envoy_dynamic_module_type_envoy_buffer*, envoy_dynamic_module_type_envoy_buffer*) {
+  IS_ENVOY_BUG("envoy_dynamic_module_callback_http_get_dynamic_typed_metadata: not implemented in "
+               "this context");
+  return false;
+}
+
 __attribute__((weak)) bool envoy_dynamic_module_callback_http_get_metadata_string(
     envoy_dynamic_module_type_http_filter_envoy_ptr, envoy_dynamic_module_type_metadata_source,
     envoy_dynamic_module_type_module_buffer, envoy_dynamic_module_type_module_buffer,

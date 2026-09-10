@@ -345,6 +345,16 @@ fn test_dynamic_metadata_callbacks_on_response_body() {
     })
     .return_const(())
     .once();
+  envoy_filter
+    .expect_get_dynamic_typed_metadata_raw()
+    .withf(|ns| ns == "ns_req_header_typed")
+    .returning(|_| {
+      Some(DynamicTypedMetadata::new(
+        "t/x".to_string(),
+        vec![0x01, 0x02],
+      ))
+    })
+    .once();
   // Route/Cluster/Host metadata.
   envoy_filter
     .expect_get_metadata_string()
@@ -632,6 +642,36 @@ fn test_dynamic_metadata_callbacks_on_response_body() {
     f.on_response_body(&mut envoy_filter, false),
     abi::envoy_dynamic_module_type_on_http_filter_response_body_status::Continue
   );
+}
+
+#[test]
+fn test_typed_dynamic_metadata_type_safety() {
+  let mut envoy_filter = MockEnvoyHttpFilter::default();
+
+  envoy_filter
+    .expect_get_dynamic_typed_metadata_raw()
+    .withf(|ns| ns == "missing")
+    .returning(|_| None)
+    .once();
+  let missing = EnvoyHttpFilterDynamicTypedMetadataExt::get_dynamic_typed_metadata::<
+    TestTypedMetadata,
+  >(&envoy_filter, "missing");
+  assert!(missing.is_none());
+
+  envoy_filter
+    .expect_get_dynamic_typed_metadata_raw()
+    .withf(|ns| ns == "wrong_type")
+    .returning(|_| {
+      Some(DynamicTypedMetadata::new(
+        "type.example/Other".to_string(),
+        vec![0x01, 0x02],
+      ))
+    })
+    .once();
+  let wrong_type = EnvoyHttpFilterDynamicTypedMetadataExt::get_dynamic_typed_metadata::<
+    TestTypedMetadata,
+  >(&envoy_filter, "wrong_type");
+  assert!(wrong_type.is_none());
 }
 
 #[test]

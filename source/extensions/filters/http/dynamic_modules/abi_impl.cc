@@ -1359,6 +1359,26 @@ void envoy_dynamic_module_callback_http_set_dynamic_typed_metadata(
   typed_metadata[std::string(ns.ptr, ns.length)].MergeFrom(typed_value);
 }
 
+bool envoy_dynamic_module_callback_http_get_dynamic_typed_metadata(
+    envoy_dynamic_module_type_http_filter_envoy_ptr filter_envoy_ptr,
+    envoy_dynamic_module_type_module_buffer ns, envoy_dynamic_module_type_envoy_buffer* type_url,
+    envoy_dynamic_module_type_envoy_buffer* value) {
+  auto filter = static_cast<DynamicModuleHttpFilter*>(filter_envoy_ptr);
+  auto* stream_info = filter->streamInfo();
+  if (!stream_info) {
+    return false;
+  }
+  const auto& typed_metadata = stream_info->dynamicMetadata().typed_filter_metadata();
+  const auto typed_value = typed_metadata.find(std::string(ns.ptr, ns.length));
+  if (typed_value == typed_metadata.end()) {
+    return false;
+  }
+  const auto& any = typed_value->second;
+  *type_url = {const_cast<char*>(any.type_url().data()), any.type_url().size()};
+  *value = {const_cast<char*>(any.value().data()), any.value().size()};
+  return true;
+}
+
 bool envoy_dynamic_module_callback_http_get_metadata_string(
     envoy_dynamic_module_type_http_filter_envoy_ptr filter_envoy_ptr,
     envoy_dynamic_module_type_metadata_source metadata_source,

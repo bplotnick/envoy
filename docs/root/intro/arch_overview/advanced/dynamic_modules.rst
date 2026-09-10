@@ -99,6 +99,19 @@ Envoy and corrupt the process, regardless of whether ``CatchUnwind`` is used. Th
 adds graceful filter-level teardown on top of that guard. The affected request or
 connection is terminated. Other traffic is unaffected.
 
+Typed dynamic metadata (Rust SDK)
+---------------------------------
+
+HTTP filter modules can read typed dynamic metadata without handling Envoy-owned buffers. A module
+implements ``DynamicTypedMetadataMessage`` for its protobuf type, declaring the expected
+``google.protobuf.Any`` type URL and how to decode the message payload. It can then call
+``EnvoyHttpFilterDynamicTypedMetadataExt::get_dynamic_typed_metadata`` to validate the type URL and
+return the decoded Rust type. The method returns ``None`` if the namespace is absent, the type URL
+does not match, or decoding fails.
+
+The lower-level ``get_dynamic_typed_metadata_raw`` method returns an owned type URL and payload for
+modules that need to select a decoder at runtime.
+
 Getting started
 --------------------------
 
