@@ -3,6 +3,7 @@
 ///
 /// This is cloneable and copyable, but the underlying memory is not copied. It can be
 /// thought of as an alias to &\[u8\] but the underlying memory is owned by Envoy.
+/// Implements [`std::ops::Deref`] to `[u8]` for slice methods, indexing, and coercion to `&[u8]`.
 //
 // Implementation note: The lifetime parameter `'a` is used to ensure that the memory region pointed
 // to by `raw_ptr` is valid. The invalidation can happen when the mutable
@@ -63,6 +64,15 @@ impl EnvoyBuffer<'_> {
     // Safety: caller invariant from `new` / `new_from_raw` that `(raw_ptr, length)` describes
     // a live region of `length` bytes for the buffer's lifetime.
     unsafe { std::slice::from_raw_parts(self.raw_ptr, self.length) }
+  }
+}
+
+impl std::ops::Deref for EnvoyBuffer<'_> {
+  type Target = [u8];
+
+  #[inline]
+  fn deref(&self) -> &Self::Target {
+    self.as_slice()
   }
 }
 
@@ -250,6 +260,29 @@ mod tests {
     // getters can return Envoy-filled entries directly without normalizing empty ones.
     assert_eq!(EnvoyBuffer::default().as_slice(), b"");
     assert_eq!(EnvoyBuffer::new(b"").as_slice(), b"");
+  }
+
+  #[test]
+  fn test_envoy_buffer_deref_supports_slice_operations() {
+    let data = b"hello";
+    let buffer = EnvoyBuffer::new(data);
+    let slice: &[u8] = &buffer;
+    assert_eq!(slice, data);
+    assert_eq!(slice.as_ptr(), data.as_ptr());
+    assert_eq!(buffer.len(), 5);
+    assert_eq!(buffer[0], b'h');
+    assert_eq!(&buffer[1 ..], b"ello");
+    assert!(buffer.starts_with(b"he"));
+  }
+
+  #[test]
+  fn test_envoy_buffer_deref_supports_null_and_empty_buffers() {
+    for buffer in [EnvoyBuffer::default(), EnvoyBuffer::new(b"")] {
+      let slice: &[u8] = &buffer;
+      assert!(slice.is_empty());
+      assert!(buffer.is_empty());
+      assert_eq!(buffer.get(0), None);
+    }
   }
 
   #[test]
