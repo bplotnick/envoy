@@ -78,6 +78,7 @@ impl std::ops::Deref for EnvoyBuffer<'_> {
 
 /// This is exactly the same as [`EnvoyBuffer`] except that it is mutable and data can be written
 /// in-place. See [`EnvoyBuffer`] for more details.
+/// Implements [`std::ops::DerefMut`] for mutable slice access through `&mut [u8]`.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct EnvoyMutBuffer<'a> {
@@ -143,6 +144,22 @@ impl EnvoyMutBuffer<'_> {
     // Safety: caller invariant from `new` / `new_from_raw`, plus exclusive borrow on
     // the underlying memory for the duration of the returned slice.
     unsafe { std::slice::from_raw_parts_mut(self.raw_ptr, self.length) }
+  }
+}
+
+impl std::ops::Deref for EnvoyMutBuffer<'_> {
+  type Target = [u8];
+
+  #[inline]
+  fn deref(&self) -> &Self::Target {
+    self.as_slice()
+  }
+}
+
+impl std::ops::DerefMut for EnvoyMutBuffer<'_> {
+  #[inline]
+  fn deref_mut(&mut self) -> &mut Self::Target {
+    self.as_mut_slice()
   }
 }
 
@@ -299,6 +316,41 @@ mod tests {
     let mut buffer = EnvoyMutBuffer::default();
     assert_eq!(buffer.as_slice(), b"");
     assert_eq!(buffer.as_mut_slice(), b"");
+  }
+
+  #[test]
+  fn test_envoy_mut_buffer_deref_supports_slice_operations() {
+    let mut data = *b"hello";
+    let ptr = data.as_mut_ptr();
+    let mut buffer = unsafe { EnvoyMutBuffer::new_from_raw(ptr, data.len()) };
+    let slice: &[u8] = &buffer;
+    assert_eq!(slice, b"hello");
+    assert_eq!(slice.as_ptr(), ptr);
+    assert_eq!(buffer.len(), 5);
+    assert_eq!(&buffer[1 ..], b"ello");
+
+    buffer[0] = b'j';
+    let slice: &mut [u8] = &mut buffer;
+    assert_eq!(slice.as_mut_ptr(), ptr);
+    slice[1 ..].copy_from_slice(b"elly");
+    buffer.make_ascii_uppercase();
+    assert_eq!(&*buffer, b"JELLY");
+    assert_eq!(data, *b"JELLY");
+  }
+
+  #[test]
+  fn test_envoy_mut_buffer_deref_supports_null_and_empty_buffers() {
+    let mut data = [];
+    let empty = unsafe { EnvoyMutBuffer::new_from_raw(data.as_mut_ptr(), 0) };
+    for mut buffer in [EnvoyMutBuffer::default(), empty] {
+      let slice: &[u8] = &buffer;
+      assert!(slice.is_empty());
+      let slice: &mut [u8] = &mut buffer;
+      assert!(slice.is_empty());
+      assert!(buffer.is_empty());
+      assert_eq!(buffer.get_mut(0), None);
+      buffer.reverse();
+    }
   }
 
   #[test]
