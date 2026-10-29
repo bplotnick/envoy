@@ -275,31 +275,20 @@ mod tests {
   fn test_envoy_buffer_as_slice_treats_null_and_empty_alike() {
     // A null buffer and a non-null zero-length buffer both yield an empty slice, so the list
     // getters can return Envoy-filled entries directly without normalizing empty ones.
-    assert_eq!(EnvoyBuffer::default().as_slice(), b"");
-    assert_eq!(EnvoyBuffer::new(b"").as_slice(), b"");
+    for buffer in [EnvoyBuffer::default(), EnvoyBuffer::new(b"")] {
+      assert_eq!(buffer.as_slice(), b"");
+      let slice: &[u8] = &buffer;
+      assert!(slice.is_empty());
+    }
   }
 
   #[test]
-  fn test_envoy_buffer_deref_supports_slice_operations() {
+  fn test_envoy_buffer_deref_borrows_underlying_bytes() {
     let data = b"hello";
     let buffer = EnvoyBuffer::new(data);
     let slice: &[u8] = &buffer;
     assert_eq!(slice, data);
     assert_eq!(slice.as_ptr(), data.as_ptr());
-    assert_eq!(buffer.len(), 5);
-    assert_eq!(buffer[0], b'h');
-    assert_eq!(&buffer[1 ..], b"ello");
-    assert!(buffer.starts_with(b"he"));
-  }
-
-  #[test]
-  fn test_envoy_buffer_deref_supports_null_and_empty_buffers() {
-    for buffer in [EnvoyBuffer::default(), EnvoyBuffer::new(b"")] {
-      let slice: &[u8] = &buffer;
-      assert!(slice.is_empty());
-      assert!(buffer.is_empty());
-      assert_eq!(buffer.get(0), None);
-    }
   }
 
   #[test]
@@ -312,45 +301,31 @@ mod tests {
   }
 
   #[test]
-  fn test_envoy_mut_buffer_slices_are_empty_when_null() {
-    let mut buffer = EnvoyMutBuffer::default();
-    assert_eq!(buffer.as_slice(), b"");
-    assert_eq!(buffer.as_mut_slice(), b"");
+  fn test_envoy_mut_buffer_slices_are_empty_when_null_or_zero_length() {
+    let mut data = [];
+    let empty = unsafe { EnvoyMutBuffer::new_from_raw(data.as_mut_ptr(), 0) };
+    for mut buffer in [EnvoyMutBuffer::default(), empty] {
+      assert_eq!(buffer.as_slice(), b"");
+      assert_eq!(buffer.as_mut_slice(), b"");
+      let slice: &[u8] = &buffer;
+      assert!(slice.is_empty());
+      let slice: &mut [u8] = &mut buffer;
+      assert!(slice.is_empty());
+    }
   }
 
   #[test]
-  fn test_envoy_mut_buffer_deref_supports_slice_operations() {
+  fn test_envoy_mut_buffer_deref_borrows_underlying_bytes() {
     let mut data = *b"hello";
     let ptr = data.as_mut_ptr();
     let mut buffer = unsafe { EnvoyMutBuffer::new_from_raw(ptr, data.len()) };
     let slice: &[u8] = &buffer;
     assert_eq!(slice, b"hello");
     assert_eq!(slice.as_ptr(), ptr);
-    assert_eq!(buffer.len(), 5);
-    assert_eq!(&buffer[1 ..], b"ello");
-
-    buffer[0] = b'j';
     let slice: &mut [u8] = &mut buffer;
     assert_eq!(slice.as_mut_ptr(), ptr);
-    slice[1 ..].copy_from_slice(b"elly");
-    buffer.make_ascii_uppercase();
-    assert_eq!(&*buffer, b"JELLY");
-    assert_eq!(data, *b"JELLY");
-  }
-
-  #[test]
-  fn test_envoy_mut_buffer_deref_supports_null_and_empty_buffers() {
-    let mut data = [];
-    let empty = unsafe { EnvoyMutBuffer::new_from_raw(data.as_mut_ptr(), 0) };
-    for mut buffer in [EnvoyMutBuffer::default(), empty] {
-      let slice: &[u8] = &buffer;
-      assert!(slice.is_empty());
-      let slice: &mut [u8] = &mut buffer;
-      assert!(slice.is_empty());
-      assert!(buffer.is_empty());
-      assert_eq!(buffer.get_mut(0), None);
-      buffer.reverse();
-    }
+    slice[0] = b'j';
+    assert_eq!(data, *b"jello");
   }
 
   #[test]
