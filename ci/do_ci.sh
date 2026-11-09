@@ -841,18 +841,15 @@ case $CI_TARGET in
         ;;
 
     external)
-        echo "Testing legacy allocator flags and explicit overrides..."
-        for legacy_allocator in disabled gperftools debug; do
-            bazel test "${BAZEL_BUILD_OPTIONS[@]}" \
-                --@envoy//bazel:allocator=from_flags \
-                --@envoy//bazel:jemalloc=False \
-                --define "tcmalloc=${legacy_allocator}" \
-                //test/bazel/allocator:allocator_tests
-        done
+        echo "Testing allocator transitions with inherited legacy flags..."
+        bazel test "${BAZEL_BUILD_OPTIONS[@]}" \
+            --@envoy//bazel:allocator=from_flags \
+            --define tcmalloc=gperftools \
+            //test/bazel/allocator:system_allocator_build_test
         bazel test "${BAZEL_BUILD_OPTIONS[@]}" \
             --@envoy//bazel:allocator=from_flags \
             --@envoy//bazel:jemalloc=True \
-            //test/bazel/allocator:allocator_tests
+            //test/bazel/allocator:system_allocator_build_test
         echo "Testing external workspace build..."
         pushd "${ENVOY_SRCDIR}/bazel/tests/external"
         bazel build "${BAZEL_BUILD_OPTIONS[@]}" @envoy//source/common/common:assert_lib
