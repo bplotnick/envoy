@@ -1,12 +1,12 @@
 load("@bazel_skylib//lib:selects.bzl", "selects")
-load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag", "string_flag")
 load("@envoy_toolshed//:utils.bzl", "json_merge")
 load("@rules_cc//cc:defs.bzl", "cc_library")
 load("@rules_java//toolchains:default_java_toolchain.bzl", "default_java_toolchain")
 load("@rules_python//python:defs.bzl", "py_test")
 load("@rules_shell//shell:sh_library.bzl", "sh_library")
 load("//bazel:envoy_build_system.bzl", "envoy_package")
-load(":deprecated_features.bzl", "check_removed_fips_define", "check_removed_wasm_defines")
+load(":deprecated_features.bzl", "check_removed_allocator_flags", "check_removed_fips_define", "check_removed_wasm_defines")
 
 licenses(["notice"])  # Apache 2
 
@@ -357,21 +357,34 @@ config_setting(
     },
 )
 
+string_flag(
+    name = "allocator",
+    build_setting_default = "tcmalloc",
+    values = [
+        "tcmalloc",
+        "gperftools",
+        "debug",
+        "jemalloc",
+        "system",
+    ],
+)
+
 config_setting(
     name = "disable_tcmalloc",
-    values = {"define": "tcmalloc=disabled"},
+    flag_values = {":allocator": "system"},
 )
 
 config_setting(
     name = "debug_tcmalloc",
-    values = {"define": "tcmalloc=debug"},
+    flag_values = {":allocator": "debug"},
 )
 
 config_setting(
     name = "gperftools_tcmalloc",
-    values = {"define": "tcmalloc=gperftools"},
+    flag_values = {":allocator": "gperftools"},
 )
 
+# Retained only to report a migration error when enabled.
 bool_flag(
     name = "jemalloc",
     build_setting_default = False,
@@ -389,7 +402,19 @@ config_setting(
 
 config_setting(
     name = "jemalloc_enabled",
-    flag_values = {":jemalloc": "True"},
+    flag_values = {":allocator": "jemalloc"},
+)
+
+config_setting(
+    name = "tcmalloc_x86_64",
+    constraint_values = ["@platforms//cpu:x86_64"],
+    flag_values = {":allocator": "tcmalloc"},
+)
+
+config_setting(
+    name = "tcmalloc_aarch64",
+    constraint_values = ["@platforms//cpu:aarch64"],
+    flag_values = {":allocator": "tcmalloc"},
 )
 
 config_setting(
@@ -771,6 +796,11 @@ selects.config_setting_group(
     match_any = [
         ":using_boringssl_fips",
     ],
+)
+
+check_removed_allocator_flags(
+    name = "check_removed_allocator_flags",
+    visibility = ["//visibility:public"],
 )
 
 check_removed_fips_define(

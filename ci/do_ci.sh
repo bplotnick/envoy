@@ -533,7 +533,7 @@ case $CI_TARGET in
             bazel_with_collection \
                 test "${BAZEL_BUILD_OPTIONS[@]}" \
                 --config=compile-time-options \
-                --define tcmalloc=gperftools \
+                --@envoy//bazel:allocator=gperftools \
                 --@proxy-wasm-cpp-host//bazel:engine=wamr \
                 -c fastbuild \
                 "${TEST_TARGETS[@]}"
@@ -547,7 +547,7 @@ case $CI_TARGET in
             --config=compile-time-options \
             --@proxy-wasm-cpp-host//bazel:engine=wasmtime \
             --define admin_functionality=disabled \
-            --@envoy//bazel:jemalloc=True \
+            --@envoy//bazel:allocator=jemalloc \
             -c fastbuild \
             "${TEST_TARGETS[@]}"
         # "--define log_debug_assert_in_release=enabled" must be tested with a release build, so run only
@@ -555,7 +555,7 @@ case $CI_TARGET in
         bazel_with_collection \
             test "${BAZEL_BUILD_OPTIONS[@]}" \
             --config=compile-time-options \
-            --define tcmalloc=gperftools \
+            --@envoy//bazel:allocator=gperftools \
             --@proxy-wasm-cpp-host//bazel:engine=wasmtime \
             -c opt \
             @envoy//test/common/common:assert_test \
@@ -564,7 +564,7 @@ case $CI_TARGET in
         bazel_with_collection \
             test "${BAZEL_BUILD_OPTIONS[@]}" \
             --config=compile-time-options \
-            --define tcmalloc=gperftools \
+            --@envoy//bazel:allocator=gperftools \
             --@proxy-wasm-cpp-host//bazel:engine=wasmtime \
             -c opt \
             @envoy//test/common/common:assert_test \
@@ -573,7 +573,7 @@ case $CI_TARGET in
         echo "Building binary with wasm=wasmtime... and logging disabled"
         bazel build "${BAZEL_BUILD_OPTIONS[@]}" \
             --config=compile-time-options \
-            --define tcmalloc=gperftools \
+            --@envoy//bazel:allocator=gperftools \
             --@proxy-wasm-cpp-host//bazel:engine=wasmtime \
             --define enable_logging=disabled \
             -c fastbuild \

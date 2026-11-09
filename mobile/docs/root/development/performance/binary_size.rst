@@ -65,7 +65,7 @@ binary size:
 4. ``--linkopt=-fuse-ld=lld``: use the lld linker. Explicitly added.
 5. ``--define=google_grpc=disabled``: more info in the `envoy docs <envoy_docs>`_. Due to the project's ``.bazelrc``.
 6. ``--define=signal_trace=disabled``: more info in the `envoy docs <envoy_docs>`_. Due to the project's ``.bazelrc``.
-7. ``--define=tcmalloc=disabled``: more info in the `envoy docs <envoy_docs>`_. Due to the project's ``.bazelrc``.
+7. ``--@envoy//bazel:allocator=system``: more info in the `envoy docs <envoy_docs>`_. Due to the project's ``.bazelrc``.
 8. ``--define=hot_restart=disabled``: more info in the `envoy docs <envoy_docs>`_. Due to the project's ``.bazelrc``.
 
 After compiling, the binary can be stripped of all symbols by using ``strip``::

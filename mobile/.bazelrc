@@ -18,7 +18,7 @@ common --repo_env=ACCEPTED_ANDROID_NDK_LICENSE_VERSION=r29
 
 # Common flags for all builds
 build --define=hot_restart=disabled
-build --define=tcmalloc=disabled
+build --@envoy//bazel:allocator=system
 build --define=admin_html=disabled
 build --define=static_extension_registration=disabled
 build --define=admin_functionality=disabled

@@ -38,8 +38,10 @@ _LINUX = Label("//bazel:linux")
 _NO_DEBUG_INFO = Label("//bazel:no_debug_info")
 _OPT_BUILD = Label("//bazel:opt_build")
 _STATIC_STDLIB = Label("//bazel:static_stdlib")
+_TCMALLOC_AARCH64 = Label("//bazel:tcmalloc_aarch64")
 _TCMALLOC_ALL_LIBS = Label("//bazel:tcmalloc_all_libs")
 _TCMALLOC_LIB = Label("//bazel:tcmalloc_lib")
+_TCMALLOC_X86_64 = Label("//bazel:tcmalloc_x86_64")
 _UHV_ENABLED = Label("//bazel:uhv_enabled")
 _WINDOWS_DBG_BUILD = Label("//bazel:windows_dbg_build")
 _WINDOWS_FASTBUILD_BUILD = Label("//bazel:windows_fastbuild_build")
@@ -138,8 +140,8 @@ def envoy_copts(test = False):
                _GPERFTOOLS_TCMALLOC: ["-DGPERFTOOLS_TCMALLOC"],
                _JEMALLOC_ENABLED: ["-DJEMALLOC"],
                (
-                   "@platforms//cpu:x86_64",
-                   "@platforms//cpu:aarch64",
+                   _TCMALLOC_X86_64,
+                   _TCMALLOC_AARCH64,
                ): ["-DTCMALLOC"],
                "//conditions:default": ["-DGPERFTOOLS_TCMALLOC"],
            }) + select({

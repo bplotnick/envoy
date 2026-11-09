@@ -134,7 +134,7 @@ build:linux --features=per_object_debug_info
 # macOS
 build:macos --action_env=PATH=/opt/homebrew/bin:/opt/local/bin:/usr/local/bin:/usr/bin:/bin
 build:macos --host_action_env=PATH=/opt/homebrew/bin:/opt/local/bin:/usr/local/bin:/usr/bin:/bin
-build:macos --define tcmalloc=disabled
+build:macos --@envoy//bazel:allocator=system
 build:macos --cxxopt=-std=c++20 --host_cxxopt=-std=c++20
 
 
@@ -209,7 +209,7 @@ build:coverage --experimental_fetch_all_coverage_outputs
 build:coverage --collect_code_coverage
 build:coverage --instrumentation_filter="^//source(?!/common/quic/platform)[/:],^//envoy[/:],^//contrib(?!/.*/test)[/:]"
 build:coverage --remote_download_minimal
-build:coverage --define=tcmalloc=gperftools
+build:coverage --@envoy//bazel:allocator=gperftools
 build:coverage --define=no_debug_info=1
 # `--no-relax` is required for coverage to not err with `relocation R_X86_64_REX_GOTPCRELX`
 build:coverage --linkopt=-Wl,-s,--no-relax
@@ -281,7 +281,7 @@ common:openssl --build_tag_filters=-nofips
 #############################################################################
 
 # Common flags for sanitizers
-build:sanitizer --define tcmalloc=disabled
+build:sanitizer --@envoy//bazel:allocator=system
 build:sanitizer --linkopt -ldl
 test:sanitizer --build_tests_only
 
@@ -398,7 +398,7 @@ build:oss-fuzz --dynamic_mode=off
 build:oss-fuzz --strip=never
 build:oss-fuzz --copt=-fno-sanitize=vptr
 build:oss-fuzz --linkopt=-fno-sanitize=vptr
-build:oss-fuzz --define=tcmalloc=disabled
+build:oss-fuzz --@envoy//bazel:allocator=system
 build:oss-fuzz --define=signal_trace=disabled
 build:oss-fuzz --copt=-D_LIBCPP_DISABLE_DEPRECATION_WARNINGS
 build:oss-fuzz --linkopt=-lc++

@@ -626,8 +626,7 @@ The following optional features can be disabled on the Bazel build command-line:
 * Google C++ gRPC client with `--define google_grpc=disabled`
 * Backtracing on signals with `--define signal_trace=disabled`
 * Active stream state dump on signals with `--define signal_trace=disabled` or `--define disable_object_dump_on_signal_trace=disabled`
-* tcmalloc with `--define tcmalloc=disabled`. Also you can choose Gperftools' implementation of
-  tcmalloc with `--define tcmalloc=gperftools` which is the default for builds other than x86_64 and aarch64.
+* tcmalloc with `--//bazel:allocator=system`.
 * deprecated features with `--define deprecated_features=disabled`
 * http3/quic with `--//bazel:http3=False`
 * autolinking libraries with `--define=library_autolink=disabled`
@@ -653,7 +652,7 @@ The following optional features can be enabled on the Bazel build command-line:
   `--define log_fast_debug_assert_in_release=enabled`. SLOW_ASSERT()s can be included with `--define log_debug_assert_in_release=enabled`. The default behavior is to compile all debug assertions out of
   release builds so that the condition is not evaluated. This option has no effect in debug builds.
 * memory-debugging (scribbling over memory after allocation and before freeing) with
-  `--define tcmalloc=debug`. Note this option cannot be used with FIPS mode and
+  `--//bazel:allocator=debug`. Note this option cannot be used with FIPS mode and
   tcmalloc is built from the sources of Gperftools.
 * Default [path normalization](https://github.com/envoyproxy/envoy/issues/6435) with
   `--define path_normalization_by_default=true`. Note this still could be disable by explicit xDS config.
@@ -666,6 +665,29 @@ The following optional features can be enabled on the Bazel build command-line:
   A KNOWN_ISSUE_ASSERT is an assertion that should pass (like all assertions), but sometimes fails for some as-yet unidentified or unresolved reason. Because it is known to potentially fail, it can be compiled out even when DEBUG is true, when this flag is set. This allows Envoy to be run in production with assertions generally enabled, without crashing for known issues. KNOWN_ISSUE_ASSERT should only be used for newly-discovered issues that represent benign violations of expectations.
 * Envoy is built using [`zlib-ng`](https://github.com/zlib-ng/zlib-ng), you can link an alternative implementation
   using e.g. `--@envoy//bazel:zlib=@zlib`. This would require registering the zlib repository with Bazel.
+
+## Allocator selection
+
+Use `--//bazel:allocator=<allocator>` to select one allocator:
+
+| Value | Allocator |
+| --- | --- |
+| `tcmalloc` (default) | The existing platform-dependent tcmalloc implementation: Google tcmalloc on Linux x86_64/aarch64, Gperftools elsewhere. |
+| `gperftools` | Gperftools tcmalloc with profiling support. |
+| `debug` | Gperftools tcmalloc with memory debugging. |
+| `jemalloc` | jemalloc. |
+| `system` | The system allocator, with no bundled allocator dependency. |
+
+Starlark transitions can set `//bazel:allocator` for individual dependencies. All
+allocator choices use the same setting, so a transition replaces the inherited
+choice. Setting it to its current value does not create another configuration.
+Coverage selects `gperftools`; sanitizer builds select `system`.
+
+The old `--define tcmalloc=...` options and enabling `--//bazel:jemalloc` are no
+longer supported. Replace `tcmalloc=disabled` with `--//bazel:allocator=system`,
+`tcmalloc=gperftools` or `tcmalloc=debug` with the corresponding allocator value,
+and `--//bazel:jemalloc` with `--//bazel:allocator=jemalloc`. Downstream modules
+should qualify the setting as `--@envoy//bazel:allocator=<allocator>`.
 
 ## Enabling and disabling extensions
 

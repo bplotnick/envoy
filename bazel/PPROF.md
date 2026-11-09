@@ -36,7 +36,7 @@ inside
 
 Build the static binary using bazel:
 
-    $ bazel build --define tcmalloc=gperftools //source/exe:envoy-static
+    $ bazel build --//bazel:allocator=gperftools //source/exe:envoy-static
 
 ### Collecting the profile
 
@@ -63,15 +63,15 @@ The profiler library is automatically linked into envoy_cc_test targets.
 
 Run a test with heap profiling enabled, like so:
 
-    $ bazel test --test_env=HEAPPROFILE=/tmp/heapprof --define tcmalloc=gperftools <test target>
+    $ bazel test --test_env=HEAPPROFILE=/tmp/heapprof --//bazel:allocator=gperftools <test target>
 
 Run a test with CPU profiling enabled, like so:
 
-    $ bazel test --test_env=CPUPROFILE=/tmp/cpuprof --define tcmalloc=gperftools <test target>
+    $ bazel test --test_env=CPUPROFILE=/tmp/cpuprof --//bazel:allocator=gperftools <test target>
 
 Note that heap checks and heap profile collection in tests have noticiable performance implications. Use the following command to collect a CPU profile from a test target with heap check and heap profile collection disabled:
 
-    $ bazel test --test_env=CPUPROFILE=/tmp/cpuprof --test_env=HEAPPROFILE= --test_env=HEAPCHECK= --define tcmalloc=gperftools <test target>
+    $ bazel test --test_env=CPUPROFILE=/tmp/cpuprof --test_env=HEAPPROFILE= --test_env=HEAPCHECK= --//bazel:allocator=gperftools <test target>
 
 ## Starting and stopping profile programmatically
 
