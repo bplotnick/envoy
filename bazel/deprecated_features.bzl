@@ -1,26 +1,5 @@
 """Rules for detecting and failing on deprecated build flags."""
 
-load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
-
-def _check_removed_allocator_flags_impl(ctx):
-    if "tcmalloc" in ctx.var:
-        allocator = {
-            "disabled": "system",
-            "gperftools": "gperftools",
-            "debug": "debug",
-        }.get(ctx.var["tcmalloc"], "tcmalloc")
-        fail("--define tcmalloc={} is no longer supported. Use --@envoy//bazel:allocator={} instead.".format(ctx.var["tcmalloc"], allocator))
-    if ctx.attr._jemalloc[BuildSettingInfo].value:
-        fail("--@envoy//bazel:jemalloc is no longer supported. Use --@envoy//bazel:allocator=jemalloc instead.")
-    return []
-
-check_removed_allocator_flags = rule(
-    implementation = _check_removed_allocator_flags_impl,
-    attrs = {
-        "_jemalloc": attr.label(default = Label("//bazel:jemalloc")),
-    },
-)
-
 def _check_removed_fips_define_impl(ctx):
     """Check if the deprecated --define boringssl=fips is set"""
     if ctx.var.get("boringssl") == "fips":

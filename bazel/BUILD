@@ -6,7 +6,7 @@ load("@rules_java//toolchains:default_java_toolchain.bzl", "default_java_toolcha
 load("@rules_python//python:defs.bzl", "py_test")
 load("@rules_shell//shell:sh_library.bzl", "sh_library")
 load("//bazel:envoy_build_system.bzl", "envoy_package")
-load(":deprecated_features.bzl", "check_removed_allocator_flags", "check_removed_fips_define", "check_removed_wasm_defines")
+load(":deprecated_features.bzl", "check_removed_fips_define", "check_removed_wasm_defines")
 
 licenses(["notice"])  # Apache 2
 
@@ -359,8 +359,9 @@ config_setting(
 
 string_flag(
     name = "allocator",
-    build_setting_default = "tcmalloc",
+    build_setting_default = "from_flags",
     values = [
+        "from_flags",
         "tcmalloc",
         "gperftools",
         "debug",
@@ -370,21 +371,47 @@ string_flag(
 )
 
 config_setting(
-    name = "disable_tcmalloc",
+    name = "allocator_from_flags",
+    flag_values = {":allocator": "from_flags"},
+)
+
+config_setting(
+    name = "system_allocator",
     flag_values = {":allocator": "system"},
 )
 
 config_setting(
-    name = "debug_tcmalloc",
+    name = "debug_allocator",
     flag_values = {":allocator": "debug"},
 )
 
 config_setting(
-    name = "gperftools_tcmalloc",
+    name = "gperftools_allocator",
     flag_values = {":allocator": "gperftools"},
 )
 
-# Retained only to report a migration error when enabled.
+config_setting(
+    name = "jemalloc_allocator",
+    flag_values = {":allocator": "jemalloc"},
+)
+
+# Keep the original conditions separate so an explicit allocator choice can
+# override inherited legacy flags, including from a Starlark transition.
+config_setting(
+    name = "legacy_disable_tcmalloc",
+    values = {"define": "tcmalloc=disabled"},
+)
+
+config_setting(
+    name = "legacy_debug_tcmalloc",
+    values = {"define": "tcmalloc=debug"},
+)
+
+config_setting(
+    name = "legacy_gperftools_tcmalloc",
+    values = {"define": "tcmalloc=gperftools"},
+)
+
 bool_flag(
     name = "jemalloc",
     build_setting_default = False,
@@ -401,20 +428,40 @@ config_setting(
 )
 
 config_setting(
+    name = "legacy_jemalloc_enabled",
+    flag_values = {":jemalloc": "True"},
+)
+
+alias(
+    name = "disable_tcmalloc",
+    actual = select({
+        ":allocator_from_flags": ":legacy_disable_tcmalloc",
+        "//conditions:default": ":system_allocator",
+    }),
+)
+
+alias(
+    name = "debug_tcmalloc",
+    actual = select({
+        ":allocator_from_flags": ":legacy_debug_tcmalloc",
+        "//conditions:default": ":debug_allocator",
+    }),
+)
+
+alias(
+    name = "gperftools_tcmalloc",
+    actual = select({
+        ":allocator_from_flags": ":legacy_gperftools_tcmalloc",
+        "//conditions:default": ":gperftools_allocator",
+    }),
+)
+
+alias(
     name = "jemalloc_enabled",
-    flag_values = {":allocator": "jemalloc"},
-)
-
-config_setting(
-    name = "tcmalloc_x86_64",
-    constraint_values = ["@platforms//cpu:x86_64"],
-    flag_values = {":allocator": "tcmalloc"},
-)
-
-config_setting(
-    name = "tcmalloc_aarch64",
-    constraint_values = ["@platforms//cpu:aarch64"],
-    flag_values = {":allocator": "tcmalloc"},
+    actual = select({
+        ":allocator_from_flags": ":legacy_jemalloc_enabled",
+        "//conditions:default": ":jemalloc_allocator",
+    }),
 )
 
 config_setting(
@@ -796,11 +843,6 @@ selects.config_setting_group(
     match_any = [
         ":using_boringssl_fips",
     ],
-)
-
-check_removed_allocator_flags(
-    name = "check_removed_allocator_flags",
-    visibility = ["//visibility:public"],
 )
 
 check_removed_fips_define(

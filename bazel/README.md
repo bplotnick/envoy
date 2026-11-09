@@ -672,22 +672,31 @@ Use `--//bazel:allocator=<allocator>` to select one allocator:
 
 | Value | Allocator |
 | --- | --- |
-| `tcmalloc` (default) | The existing platform-dependent tcmalloc implementation: Google tcmalloc on Linux x86_64/aarch64, Gperftools elsewhere. |
+| `from_flags` (default) | Honor `--define tcmalloc=...` and `--//bazel:jemalloc`, retaining the previous platform defaults when neither selects an allocator. |
+| `tcmalloc` | The platform-dependent tcmalloc implementation: Google tcmalloc on Linux x86_64/aarch64, Gperftools elsewhere. |
 | `gperftools` | Gperftools tcmalloc with profiling support. |
 | `debug` | Gperftools tcmalloc with memory debugging. |
 | `jemalloc` | jemalloc. |
 | `system` | The system allocator, with no bundled allocator dependency. |
 
 Starlark transitions can set `//bazel:allocator` for individual dependencies. All
-allocator choices use the same setting, so a transition replaces the inherited
-choice. Setting it to its current value does not create another configuration.
-Coverage selects `gperftools`; sanitizer builds select `system`.
+explicit allocator choices use the same setting, so a transition replaces the
+inherited choice. Any value other than `from_flags` takes precedence over both
+legacy options, even when those options are inherited from a parent target.
+Setting the allocator to its current value does not create another configuration.
+Changing from `from_flags` to an explicit value still creates a different
+configuration, even if the legacy flags selected the same allocator.
 
-The old `--define tcmalloc=...` options and enabling `--//bazel:jemalloc` are no
-longer supported. Replace `tcmalloc=disabled` with `--//bazel:allocator=system`,
-`tcmalloc=gperftools` or `tcmalloc=debug` with the corresponding allocator value,
-and `--//bazel:jemalloc` with `--//bazel:allocator=jemalloc`. Downstream modules
-should qualify the setting as `--@envoy//bazel:allocator=<allocator>`.
+Existing callers can continue using `--define tcmalloc=disabled`,
+`--define tcmalloc=gperftools`, `--define tcmalloc=debug`, or `--//bazel:jemalloc`
+with the default `allocator=from_flags`. Their previous selection behavior is
+unchanged, including errors for conflicting legacy allocator choices.
+
+Envoy's build configs now select explicit values: coverage selects `gperftools`;
+sanitizer builds select `system`. To override a config's allocator, use an
+explicit `--//bazel:allocator=<allocator>` or set `--//bazel:allocator=from_flags`
+to restore legacy flag selection. New callers should use the string setting;
+downstream modules should qualify it as `--@envoy//bazel:allocator=<allocator>`.
 
 ## Enabling and disabling extensions
 

@@ -20,7 +20,6 @@ load(":envoy_rbe.bzl", "envoy_exec_properties")
 load(":envoy_select.bzl", "deprecate_repository")
 load(":sanitizers.bzl", "sanitizer_deps")
 
-_CHECK_REMOVED_ALLOCATOR_FLAGS = Label("//bazel:check_removed_allocator_flags")
 _CHECK_REMOVED_FIPS_DEFINE = Label("//bazel:check_removed_fips_define")
 _CHECK_REMOVED_WASM_DEFINES = Label("//bazel:check_removed_wasm_defines")
 _COMMON_PCH = Label("//source/common/common:common_pch")
@@ -117,7 +116,6 @@ def envoy_cc_library(
         hdrs = hdrs,
         copts = envoy_copts() + envoy_pch_copts(_COMMON_PCH) + copts,
         data = [
-            _CHECK_REMOVED_ALLOCATOR_FLAGS,
             _CHECK_REMOVED_FIPS_DEFINE,
             _CHECK_REMOVED_WASM_DEFINES,
         ],

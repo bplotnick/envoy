@@ -13,7 +13,7 @@ _MARKERS = [
     "-DTCMALLOC",
 ]
 
-_AllocatorInfo = provider(fields = ["allocator", "copts", "dep", "deps", "output", "variables"])
+_AllocatorInfo = provider(fields = ["allocator", "copts", "dep", "deps", "jemalloc", "output", "variables"])
 
 def _allocator_probe_impl(ctx):
     output = ctx.actions.declare_file(ctx.label.name + ".txt")
@@ -25,6 +25,7 @@ def _allocator_probe_impl(ctx):
             copts = [opt for opt in ctx.attr.copts if opt in _MARKERS],
             dep = ctx.attr.allocator_dep.label if ctx.attr.allocator_dep else None,
             deps = [dep.label for dep in ctx.attr.allocator_deps],
+            jemalloc = ctx.attr.jemalloc[BuildSettingInfo].value,
             output = output.path,
             variables = {key: value for key, value in ctx.var.items() if key not in ["BINDIR", "GENDIR"]},
         ),
@@ -37,7 +38,7 @@ _allocator_probe = rule(
         "allocator_dep": attr.label(),
         "allocator_deps": attr.label_list(),
         "copts": attr.string_list(),
-        "guard": attr.label(default = Label("//bazel:check_removed_allocator_flags")),
+        "jemalloc": attr.label(default = Label("//bazel:jemalloc")),
     },
 )
 
@@ -62,13 +63,20 @@ with_system_allocator = rule(
 )
 
 def _assert_allocator(env, info, allocator, google_tcmalloc):
+    effective_allocator = allocator
+    if allocator == "from_flags":
+        effective_allocator = {
+            "disabled": "system",
+            "gperftools": "gperftools",
+            "debug": "debug",
+        }.get(info.variables.get("tcmalloc"), "jemalloc" if info.jemalloc else "tcmalloc")
     expected = {
         "tcmalloc": (["-DTCMALLOC"] if google_tcmalloc else ["-DGPERFTOOLS_TCMALLOC"], Label("//bazel:tcmalloc_lib"), [Label("//bazel:tcmalloc_all_libs")]),
         "gperftools": (["-DGPERFTOOLS_TCMALLOC"], Label("//bazel/external:gperftools"), [Label("//bazel/external:gperftools")]),
         "debug": (["-DENVOY_MEMORY_DEBUG_ENABLED=1", "-DGPERFTOOLS_TCMALLOC"], Label("//bazel/external:gperftools"), [Label("//bazel/external:gperftools")]),
         "jemalloc": (["-DJEMALLOC"], Label("@jemalloc//:jemalloc_with_defaults"), [Label("@jemalloc//:jemalloc_with_defaults")]),
         "system": (["-DABSL_MALLOC_HOOK_MMAP_DISABLE"], None, []),
-    }[allocator]
+    }[effective_allocator]
     asserts.equals(env, allocator, info.allocator)
     asserts.equals(env, expected[0], info.copts)
     asserts.equals(env, expected[1], info.dep)
@@ -84,10 +92,13 @@ def _allocator_test_impl(ctx):
     _assert_allocator(env, target[_AllocatorInfo], ctx.attr.expected_allocator, google_tcmalloc)
     return analysistest.end(env)
 
-def _make_allocator_test(implementation, allocator):
+def _make_allocator_test(implementation, allocator, jemalloc = None):
+    settings = {_ALLOCATOR: allocator}
+    if jemalloc != None:
+        settings[str(Label("//bazel:jemalloc"))] = jemalloc
     return analysistest.make(
         implementation,
-        config_settings = {_ALLOCATOR: allocator},
+        config_settings = settings,
         attrs = {
             "expected_allocator": attr.string(default = allocator),
             "_x86_64": attr.label(default = "@platforms//cpu:x86_64"),
@@ -100,6 +111,12 @@ _gperftools_selection_test = _make_allocator_test(_allocator_test_impl, "gperfto
 _debug_selection_test = _make_allocator_test(_allocator_test_impl, "debug")
 _jemalloc_selection_test = _make_allocator_test(_allocator_test_impl, "jemalloc")
 _system_selection_test = _make_allocator_test(_allocator_test_impl, "system")
+_from_flags_selection_test = _make_allocator_test(_allocator_test_impl, "from_flags")
+_tcmalloc_overrides_jemalloc_test = _make_allocator_test(_allocator_test_impl, "tcmalloc", jemalloc = True)
+_gperftools_overrides_jemalloc_test = _make_allocator_test(_allocator_test_impl, "gperftools", jemalloc = True)
+_debug_overrides_jemalloc_test = _make_allocator_test(_allocator_test_impl, "debug", jemalloc = True)
+_jemalloc_overrides_jemalloc_test = _make_allocator_test(_allocator_test_impl, "jemalloc", jemalloc = True)
+_system_overrides_jemalloc_test = _make_allocator_test(_allocator_test_impl, "system", jemalloc = True)
 
 def _transition_pair_impl(ctx):
     return [_TransitionInfo(plain = ctx.attr.plain[_AllocatorInfo], system = ctx.attr.system[0][_AllocatorInfo])]
@@ -132,17 +149,7 @@ _gperftools_transition_test = _make_allocator_test(_transition_test_impl, "gperf
 _debug_transition_test = _make_allocator_test(_transition_test_impl, "debug")
 _jemalloc_transition_test = _make_allocator_test(_transition_test_impl, "jemalloc")
 _system_transition_test = _make_allocator_test(_transition_test_impl, "system")
-
-def _removed_jemalloc_test_impl(ctx):
-    env = analysistest.begin(ctx)
-    asserts.expect_failure(env, "Use --@envoy//bazel:allocator=jemalloc instead.")
-    return analysistest.end(env)
-
-_removed_jemalloc_test = analysistest.make(
-    _removed_jemalloc_test_impl,
-    config_settings = {str(Label("//bazel:jemalloc")): True},
-    expect_failure = True,
-)
+_from_flags_transition_test = _make_allocator_test(_transition_test_impl, "from_flags")
 
 def _invalid_allocator_test_impl(ctx):
     env = analysistest.begin(ctx)
@@ -177,6 +184,7 @@ def allocator_test_suite(name):
         "debug": _debug_selection_test,
         "jemalloc": _jemalloc_selection_test,
         "system": _system_selection_test,
+        "from_flags": _from_flags_selection_test,
     }.items():
         test_name = allocator + "_selection_test"
         test(name = test_name, target_under_test = ":allocator_probe")
@@ -187,10 +195,20 @@ def allocator_test_suite(name):
         "debug": _debug_transition_test,
         "jemalloc": _jemalloc_transition_test,
         "system": _system_transition_test,
+        "from_flags": _from_flags_transition_test,
     }.items():
         test_name = allocator + "_transition_test"
         test(name = test_name, target_under_test = ":transition_pair")
         tests.append(test_name)
-    _removed_jemalloc_test(name = "removed_jemalloc_test", target_under_test = ":allocator_probe")
+    for allocator, test in {
+        "tcmalloc": _tcmalloc_overrides_jemalloc_test,
+        "gperftools": _gperftools_overrides_jemalloc_test,
+        "debug": _debug_overrides_jemalloc_test,
+        "jemalloc": _jemalloc_overrides_jemalloc_test,
+        "system": _system_overrides_jemalloc_test,
+    }.items():
+        test_name = allocator + "_overrides_jemalloc_test"
+        test(name = test_name, target_under_test = ":allocator_probe")
+        tests.append(test_name)
     _invalid_allocator_test(name = "invalid_allocator_test", target_under_test = "//bazel:allocator")
-    native.test_suite(name = name, tests = tests + ["removed_jemalloc_test", "invalid_allocator_test"])
+    native.test_suite(name = name, tests = tests + ["invalid_allocator_test"])
