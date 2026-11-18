@@ -5,6 +5,7 @@
 
 #include "envoy/api/api.h"
 #include "envoy/config/overload/v3/overload.pb.h"
+#include "envoy/config/subscription.h"
 #include "envoy/event/dispatcher.h"
 #include "envoy/event/scaled_range_timer_manager.h"
 #include "envoy/protobuf/message_validator.h"
@@ -16,11 +17,13 @@
 #include "envoy/thread_local/thread_local.h"
 
 #include "source/common/common/logger.h"
+#include "source/common/config/resource_type_helper.h"
 #include "source/common/event/scaled_range_timer_manager_impl.h"
 #include "source/server/synchronous_feedback_trigger.h"
 #include "source/server/trigger.h"
 
 #include "absl/container/node_hash_map.h"
+#include "absl/synchronization/mutex.h"
 
 namespace Envoy {
 namespace Server {
@@ -31,7 +34,8 @@ createTriggerFromConfig(const envoy::config::overload::v3::Trigger& trigger_conf
 class OverloadAction {
 public:
   static absl::StatusOr<std::unique_ptr<OverloadAction>>
-  create(const envoy::config::overload::v3::OverloadAction& config, Stats::Scope& stats_scope);
+  create(const envoy::config::overload::v3::OverloadAction& config, Stats::Scope& stats_scope,
+         bool initialize_stats = true);
 
   // Updates the current pressure for the given resource and returns whether the action
   // has changed state.
@@ -39,10 +43,11 @@ public:
 
   // Returns the current action state, which is the max state across all registered triggers.
   OverloadActionState getState() const;
+  void publishStats();
 
 private:
   OverloadAction(const envoy::config::overload::v3::OverloadAction& config,
-                 Stats::Scope& stats_scope, absl::Status& creation_status);
+                 Stats::Scope& stats_scope, bool initialize_stats, absl::Status& creation_status);
 
   absl::node_hash_map<std::string, TriggerPtr> triggers_;
   OverloadActionState state_;
@@ -77,6 +82,9 @@ public:
    */
   void updateResource(absl::string_view resource_name, double resource_utilization);
 
+  // Preserve the address cached by worker threads while replacing their immutable trigger set.
+  void replaceConfig(std::unique_ptr<LoadShedPointImpl> replacement);
+
 private:
   LoadShedPointImpl(const envoy::config::overload::v3::LoadShedPoint& config,
                     Stats::Scope& stats_scope, Random::RandomGenerator& random_generator,
@@ -85,6 +93,7 @@ private:
 
   // Helper to handle updating the probability to shed load given the triggers.
   void updateProbabilityShedLoad();
+  std::shared_ptr<LoadShedPointImpl> replacement();
 
   const std::string name_;
   absl::flat_hash_map<std::string, TriggerPtr> periodic_triggers_;
@@ -93,6 +102,9 @@ private:
   Stats::Gauge& scale_percent_;
   Stats::Counter& shed_load_counter_;
   Random::RandomGenerator& random_generator_;
+  absl::Mutex replacement_mutex_;
+  std::shared_ptr<LoadShedPointImpl> replacement_ ABSL_GUARDED_BY(replacement_mutex_);
+  std::atomic<bool> has_replacement_{false};
 };
 
 // Simple table that converts strings into Symbol instances. Symbols are guaranteed to start at 0
@@ -144,7 +156,9 @@ private:
 
 class ThreadLocalOverloadStateImpl;
 
-class OverloadManagerImpl : Logger::Loggable<Logger::Id::main>, public OverloadManager {
+class OverloadManagerImpl : Logger::Loggable<Logger::Id::main>,
+                            public OverloadManager,
+                            public Config::SubscriptionCallbacks {
 public:
   static absl::StatusOr<std::unique_ptr<OverloadManagerImpl>>
   create(Event::Dispatcher& dispatcher, Stats::Scope& stats_scope,
@@ -154,6 +168,8 @@ public:
          const Server::Options& options, Runtime::Loader& runtime);
 
   // Server::OverloadManager
+  absl::Status initialize(Upstream::ClusterManager& cm,
+                          ProtobufMessage::ValidationVisitor& validation_visitor) override;
   void start() override;
   bool registerForAction(const std::string& action, Event::Dispatcher& dispatcher,
                          OverloadActionCb callback) override;
@@ -165,6 +181,14 @@ public:
   getShrinkHeapConfig() const override {
     return shrink_heap_config_;
   }
+
+  // Config::SubscriptionCallbacks
+  absl::Status onConfigUpdate(const std::vector<Config::DecodedResourceRef>& resources,
+                              const std::string& version_info) override;
+  absl::Status onConfigUpdate(const std::vector<Config::DecodedResourceRef>& resources,
+                              const Protobuf::RepeatedPtrField<std::string>& removed_resources,
+                              const std::string& version_info) override;
+  void onConfigUpdateFailed(Config::ConfigUpdateFailureReason, const EnvoyException*) override {}
 
 protected:
   OverloadManagerImpl(Event::Dispatcher& dispatcher, Stats::Scope& stats_scope,
@@ -214,13 +238,14 @@ private:
                               FlushEpochId flush_epoch);
   // Flushes any enqueued action state updates to all worker threads.
   void flushResourceUpdates();
+  absl::Status applyConfig(const envoy::config::overload::v3::OverloadManager& config);
 
   bool started_{false};
   Event::Dispatcher& dispatcher_;
   TimeSource& time_source_;
   ThreadLocal::TypedSlot<ThreadLocalOverloadStateImpl> tls_;
   NamedOverloadActionSymbolTable action_symbol_table_;
-  const std::chrono::milliseconds refresh_interval_;
+  std::chrono::milliseconds refresh_interval_;
   // Tracks the latency between resource refresh updates.
   Stats::Histogram& refresh_interval_delays_;
   // Tracks when we last ran the resource monitor refresh loop.
@@ -256,6 +281,15 @@ private:
   ActionToCallbackMap action_to_callbacks_;
 
   std::optional<envoy::config::overload::v3::ShrinkHeapConfig> shrink_heap_config_;
+  const envoy::config::overload::v3::OverloadManager bootstrap_config_;
+  Stats::Scope& stats_scope_;
+  Stats::ScopeSharedPtr subscription_stats_scope_;
+  Random::RandomGenerator& random_generator_;
+  SynchronousFeedbackResourceMonitorMap synchronous_feedback_resources_;
+  absl::flat_hash_map<std::string, double> resource_pressures_;
+  std::unique_ptr<Config::ResourceTypeHelper<envoy::config::overload::v3::OverloadManager>>
+      resource_type_helper_;
+  Config::SubscriptionPtr subscription_;
 };
 
 } // namespace Server

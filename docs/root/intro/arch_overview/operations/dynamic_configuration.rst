@@ -28,6 +28,15 @@ via the built in :ref:`hot restart <arch_overview_hot_restart>` mechanism.
 Though simplistic, fairly complicated deployments can be created using static configurations and
 graceful hot restarts.
 
+ODDS
+----
+
+The :ref:`Overload Discovery Service (ODDS) <config_overload_manager_dynamic>` updates overload
+action and load shed point triggers and the resource refresh interval at runtime. Resource monitor
+definitions and action types remain in the bootstrap configuration. Envoy retains the bootstrap
+configuration until the first valid update, and retains the last accepted settings if the control
+plane disconnects or removes the resource.
+
 .. _arch_overview_dynamic_config_eds:
 
 EDS

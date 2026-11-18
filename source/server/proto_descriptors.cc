@@ -32,6 +32,9 @@ void validateProtoDescriptors() {
       "envoy.service.route.v3.RouteDiscoveryService.DeltaRoutes",
       "envoy.service.runtime.v3.RuntimeDiscoveryService.StreamRuntime",
       "envoy.service.runtime.v3.RuntimeDiscoveryService.FetchRuntime",
+      "envoy.service.overload.v3.OverloadDiscoveryService.StreamOverload",
+      "envoy.service.overload.v3.OverloadDiscoveryService.DeltaOverload",
+      "envoy.service.overload.v3.OverloadDiscoveryService.FetchOverload",
   };
 
   for (const auto& method : methods) {

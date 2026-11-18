@@ -57,6 +57,7 @@ TypeUrlToV3ServiceMap* buildTypeUrlToServiceMap() {
            "envoy.service.endpoint.v3.LocalityEndpointDiscoveryService",
            "envoy.service.listener.v3.ListenerDiscoveryService",
            "envoy.service.runtime.v3.RuntimeDiscoveryService",
+           "envoy.service.overload.v3.OverloadDiscoveryService",
            "envoy.service.extension.v3.ExtensionConfigDiscoveryService",
        }) {
     const TypeUrl resource_type_url = getResourceTypeUrl(name);

@@ -167,6 +167,7 @@ envoy_cc_library(
         "@envoy_api//envoy/service/extension/v3:pkg_cc_proto",
         "@envoy_api//envoy/service/health/v3:pkg_cc_proto",
         "@envoy_api//envoy/service/listener/v3:pkg_cc_proto",
+        "@envoy_api//envoy/service/overload/v3:pkg_cc_proto",
         "@envoy_api//envoy/service/ratelimit/v3:pkg_cc_proto",
         "@envoy_api//envoy/service/route/v3:pkg_cc_proto",
         "@envoy_api//envoy/service/runtime/v3:pkg_cc_proto",

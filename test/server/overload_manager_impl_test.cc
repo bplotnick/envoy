@@ -16,11 +16,13 @@
 
 #include "test/common/stats/stat_test_utility.h"
 #include "test/mocks/common.h"
+#include "test/mocks/config/mocks.h"
 #include "test/mocks/event/mocks.h"
 #include "test/mocks/protobuf/mocks.h"
 #include "test/mocks/runtime/mocks.h"
 #include "test/mocks/server/options.h"
 #include "test/mocks/thread_local/mocks.h"
+#include "test/mocks/upstream/cluster_manager.h"
 #include "test/test_common/registry.h"
 #include "test/test_common/simulated_time_system.h"
 #include "test/test_common/utility.h"
@@ -364,6 +366,313 @@ constexpr char proactiveResourceConfig[] = R"YAML(
           threshold:
             value: 0.5
 )YAML";
+
+class DynamicOverloadManagerTest : public OverloadManagerImplTest {
+protected:
+  envoy::config::overload::v3::OverloadManager dynamicConfig() {
+    auto config = parseConfig(kRegularStateConfig);
+    config.set_name("overload");
+    auto* point = config.add_loadshed_points();
+    point->set_name("envoy.load_shed_points.tcp_listener_accept");
+    *point->add_triggers() = config.actions(0).triggers(0);
+    return config;
+  }
+
+  absl::Status update(TestOverloadManager& manager,
+                      const envoy::config::overload::v3::OverloadManager& config,
+                      bool delta = false) {
+    const auto resources = TestUtility::decodeResources({config});
+    return delta ? manager.onConfigUpdate(resources.refvec_, {}, "1")
+                 : manager.onConfigUpdate(resources.refvec_, "1");
+  }
+};
+
+TEST_F(DynamicOverloadManagerTest, SubscribesToNamedResource) {
+  auto config = dynamicConfig();
+  config.mutable_config_source()->mutable_ads();
+  auto manager = createOverloadManager(config);
+  NiceMock<Upstream::MockClusterManager> cm;
+  auto subscription = std::make_unique<StrictMock<Config::MockSubscription>>();
+  EXPECT_CALL(*subscription, start(absl::flat_hash_set<std::string>{"overload"}));
+  EXPECT_CALL(cm.subscription_factory_,
+              subscriptionFromConfigSource(
+                  _, "type.googleapis.com/envoy.config.overload.v3.OverloadManager", _, _, _, _))
+      .WillOnce(Return(ByMove(std::move(subscription))));
+  EXPECT_TRUE(manager->initialize(cm, validation_visitor_).ok());
+  manager->start();
+  manager->stop();
+}
+
+TEST_F(DynamicOverloadManagerTest, SubscriptionCreationFailure) {
+  auto config = dynamicConfig();
+  config.mutable_config_source()->mutable_ads();
+  auto manager = createOverloadManager(config);
+  NiceMock<Upstream::MockClusterManager> cm;
+  EXPECT_CALL(cm.subscription_factory_, subscriptionFromConfigSource(_, _, _, _, _, _))
+      .WillOnce(Return(absl::InvalidArgumentError("invalid config source")));
+  EXPECT_FALSE(manager->initialize(cm, validation_visitor_).ok());
+}
+
+TEST_F(DynamicOverloadManagerTest, StaticConfigurationDoesNotSubscribe) {
+  auto manager = createOverloadManager(dynamicConfig());
+  StrictMock<Upstream::MockClusterManager> cm;
+  EXPECT_TRUE(manager->initialize(cm, validation_visitor_).ok());
+}
+
+TEST_F(DynamicOverloadManagerTest, SubscriptionRequiresName) {
+  auto config = parseConfig(kRegularStateConfig);
+  config.mutable_config_source()->mutable_ads();
+  EXPECT_THROW_WITH_MESSAGE(createOverloadManager(config), EnvoyException,
+                            "Dynamic overload configuration requires a name");
+}
+
+TEST_F(DynamicOverloadManagerTest, UpdatesTriggersAndPreservesLoadShedPointAddress) {
+  setDispatcherExpectation();
+  auto config = dynamicConfig();
+  auto manager = createOverloadManager(config);
+  bool active = false;
+  manager->registerForAction(config.actions(0).name(), dispatcher_,
+                             [&](OverloadActionState state) { active = state.isSaturated(); });
+  manager->start();
+  auto* point = manager->getLoadShedPoint(config.loadshed_points(0).name());
+  ASSERT_NE(nullptr, point);
+  factory1_.monitor_->setPressure(0.8);
+  timer_cb_();
+  EXPECT_FALSE(active);
+  EXPECT_FALSE(point->shouldShedLoad());
+
+  config.mutable_actions(0)->mutable_triggers(0)->mutable_threshold()->set_value(0.7);
+  config.mutable_loadshed_points(0)->mutable_triggers(0)->mutable_threshold()->set_value(0.7);
+  config.mutable_refresh_interval()->set_seconds(2);
+  EXPECT_CALL(*timer_, enableTimer(std::chrono::milliseconds(2000), _)).Times(2);
+  ASSERT_TRUE(update(*manager, config).ok());
+  EXPECT_TRUE(active);
+  EXPECT_TRUE(
+      manager->getThreadLocalOverloadState().getState(config.actions(0).name()).isSaturated());
+  EXPECT_EQ(point, manager->getLoadShedPoint(config.loadshed_points(0).name()));
+  EXPECT_TRUE(point->shouldShedLoad());
+
+  // A second replacement must update the same object and clear the old saturated state.
+  config.mutable_actions(0)->mutable_triggers(0)->mutable_threshold()->set_value(0.95);
+  config.mutable_loadshed_points(0)->mutable_triggers(0)->mutable_threshold()->set_value(0.95);
+  ASSERT_TRUE(update(*manager, config, true).ok());
+  EXPECT_FALSE(active);
+  EXPECT_FALSE(point->shouldShedLoad());
+  manager->stop();
+}
+
+TEST_F(DynamicOverloadManagerTest, RejectedUpdatePreservesStateAndStats) {
+  auto config = dynamicConfig();
+  auto manager = createOverloadManager(config);
+  manager->start();
+  factory1_.monitor_->setPressure(0.95);
+  timer_cb_();
+  const auto& state = manager->getThreadLocalOverloadState().getState(config.actions(0).name());
+  ASSERT_TRUE(state.isSaturated());
+
+  // Fail late, after the replacement action has been constructed.
+  config.mutable_actions(0)->mutable_triggers(0)->mutable_threshold()->set_value(0.99);
+  config.mutable_loadshed_points(0)->mutable_triggers(0)->set_name("unknown");
+  EXPECT_FALSE(update(*manager, config).ok());
+  EXPECT_TRUE(state.isSaturated());
+  EXPECT_EQ(1, stats_
+                   .gauge("overload.envoy.overload_actions.stop_accepting_requests.active",
+                          Stats::Gauge::ImportMode::NeverImport)
+                   .value());
+  timer_cb_();
+  EXPECT_TRUE(state.isSaturated());
+  manager->stop();
+}
+
+TEST_F(DynamicOverloadManagerTest, RejectsChangesToStartupConfiguration) {
+  const auto config = dynamicConfig();
+  auto manager = createOverloadManager(config);
+  auto changed = config;
+  changed.mutable_resource_monitors()->RemoveLast();
+  EXPECT_FALSE(update(*manager, changed).ok());
+  changed = config;
+  changed.mutable_actions(0)->set_name("different");
+  EXPECT_FALSE(update(*manager, changed).ok());
+  changed = config;
+  ASSERT_TRUE(changed.mutable_actions(0)->mutable_typed_config()->PackFrom(Protobuf::Empty()));
+  EXPECT_FALSE(update(*manager, changed).ok());
+  changed = config;
+  changed.mutable_buffer_factory_config()->set_minimum_account_to_track_power_of_two(10);
+  EXPECT_FALSE(update(*manager, changed).ok());
+}
+
+TEST_F(DynamicOverloadManagerTest, RejectsInvalidTriggersAndRefreshInterval) {
+  const auto config = dynamicConfig();
+  auto manager = createOverloadManager(config);
+  auto changed = config;
+  changed.mutable_actions(0)->mutable_triggers(0)->set_name("unknown");
+  EXPECT_FALSE(update(*manager, changed).ok());
+  changed = config;
+  *changed.mutable_actions(0)->add_triggers() = changed.actions(0).triggers(0);
+  EXPECT_FALSE(update(*manager, changed).ok());
+  changed = config;
+  auto* scaled = changed.mutable_actions(0)->mutable_triggers(0)->mutable_scaled();
+  scaled->set_scaling_threshold(0.9);
+  scaled->set_saturation_threshold(0.8);
+  EXPECT_FALSE(update(*manager, changed).ok());
+  changed = config;
+  changed.mutable_refresh_interval()->set_seconds(0);
+  EXPECT_FALSE(update(*manager, changed).ok());
+  changed = config;
+  changed.mutable_actions(0)->clear_triggers();
+  EXPECT_FALSE(update(*manager, changed).ok());
+  changed = config;
+  changed.mutable_loadshed_points(0)->clear_triggers();
+  EXPECT_FALSE(update(*manager, changed).ok());
+  changed = config;
+  *changed.mutable_loadshed_points(0)->add_triggers() = changed.loadshed_points(0).triggers(0);
+  EXPECT_FALSE(update(*manager, changed).ok());
+  changed = config;
+  changed.mutable_actions(0)->mutable_triggers(0)->set_name(
+      OverloadProactiveResources::get().resourceToName(
+          OverloadProactiveResourceName::GlobalDownstreamMaxConnections));
+  EXPECT_FALSE(update(*manager, changed).ok());
+}
+
+TEST_F(DynamicOverloadManagerTest, RetainsConfigurationOnRemovalAndConnectionFailure) {
+  auto config = dynamicConfig();
+  auto manager = createOverloadManager(config);
+  manager->start();
+  factory1_.monitor_->setPressure(0.95);
+  timer_cb_();
+  Protobuf::RepeatedPtrField<std::string> removed;
+  removed.Add("overload");
+  EXPECT_TRUE(manager->onConfigUpdate({}, removed, "1").ok());
+  EXPECT_TRUE(manager->onConfigUpdate({}, "2").ok());
+  manager->onConfigUpdateFailed(Config::ConfigUpdateFailureReason::ConnectionFailure, nullptr);
+  EXPECT_TRUE(
+      manager->getThreadLocalOverloadState().getState(config.actions(0).name()).isSaturated());
+  removed.Add("unexpected");
+  EXPECT_FALSE(manager->onConfigUpdate({}, removed, "3").ok());
+  removed.Clear();
+  removed.Add("unexpected");
+  EXPECT_FALSE(manager->onConfigUpdate({}, removed, "4").ok());
+  manager->stop();
+}
+
+TEST_F(DynamicOverloadManagerTest, RejectsUnexpectedResponses) {
+  auto config = dynamicConfig();
+  auto manager = createOverloadManager(config);
+  config.set_name("unexpected");
+  EXPECT_FALSE(update(*manager, config).ok());
+  config = dynamicConfig();
+  config.mutable_config_source()->mutable_ads();
+  EXPECT_FALSE(update(*manager, config).ok());
+  config.clear_config_source();
+  const auto resources = TestUtility::decodeResources({config, config});
+  EXPECT_FALSE(manager->onConfigUpdate(resources.refvec_, "1").ok());
+  const auto single_resource = TestUtility::decodeResources({config});
+  Protobuf::RepeatedPtrField<std::string> removed;
+  removed.Add("overload");
+  EXPECT_FALSE(manager->onConfigUpdate(single_resource.refvec_, removed, "1").ok());
+}
+
+TEST_F(DynamicOverloadManagerTest, AcceptsUpdateBeforeStart) {
+  setDispatcherExpectation();
+  auto config = dynamicConfig();
+  auto manager = createOverloadManager(config);
+  config.mutable_actions(0)->mutable_triggers(0)->mutable_threshold()->set_value(0.7);
+  config.mutable_refresh_interval()->set_seconds(2);
+  ASSERT_TRUE(update(*manager, config).ok());
+  EXPECT_CALL(*timer_, enableTimer(std::chrono::milliseconds(2000), _)).Times(2);
+  manager->start();
+  factory1_.monitor_->setPressure(0.8);
+  timer_cb_();
+  EXPECT_TRUE(
+      manager->getThreadLocalOverloadState().getState(config.actions(0).name()).isSaturated());
+  manager->stop();
+}
+
+TEST_F(DynamicOverloadManagerTest, OmittedRefreshIntervalUsesDefault) {
+  setDispatcherExpectation();
+  auto config = dynamicConfig();
+  auto manager = createOverloadManager(config);
+  manager->start();
+  config.clear_refresh_interval();
+  EXPECT_CALL(*timer_, enableTimer(std::chrono::milliseconds(1000), _));
+  ASSERT_TRUE(update(*manager, config).ok());
+  manager->stop();
+}
+
+TEST_F(DynamicOverloadManagerTest, ChangesTriggerResourceAndType) {
+  auto config = dynamicConfig();
+  auto manager = createOverloadManager(config);
+  manager->start();
+  factory1_.monitor_->setPressure(0.95);
+  factory2_.monitor_->setPressure(0.7);
+  timer_cb_();
+  const auto& state = manager->getThreadLocalOverloadState().getState(config.actions(0).name());
+  ASSERT_TRUE(state.isSaturated());
+  auto* action = config.mutable_actions(0);
+  action->clear_triggers();
+  auto* trigger = action->add_triggers();
+  trigger->set_name(factory2_.name());
+  trigger->mutable_scaled()->set_scaling_threshold(0.5);
+  trigger->mutable_scaled()->set_saturation_threshold(0.9);
+  ASSERT_TRUE(update(*manager, config).ok());
+  EXPECT_NEAR(0.5, state.value().value(), 1e-6);
+  // Updates from a monitor which is no longer a trigger must not affect the action.
+  factory1_.monitor_->setPressure(1.0);
+  timer_cb_();
+  EXPECT_NEAR(0.5, state.value().value(), 1e-6);
+  manager->stop();
+}
+
+TEST_F(DynamicOverloadManagerTest, RepeatedConfigurationDoesNotRepeatCallbacks) {
+  auto config = dynamicConfig();
+  auto manager = createOverloadManager(config);
+  unsigned callbacks = 0;
+  manager->registerForAction(config.actions(0).name(), dispatcher_,
+                             [&](OverloadActionState) { ++callbacks; });
+  manager->start();
+  factory1_.monitor_->setPressure(0.95);
+  timer_cb_();
+  ASSERT_EQ(1, callbacks);
+  ASSERT_TRUE(update(*manager, config).ok());
+  EXPECT_EQ(1, callbacks);
+  manager->stop();
+}
+
+TEST_F(DynamicOverloadManagerTest, UsesLastSuccessfulPressureWhenMeasurementFails) {
+  auto config = dynamicConfig();
+  auto manager = createOverloadManager(config);
+  manager->start();
+  factory1_.monitor_->setPressure(0.8);
+  timer_cb_();
+  factory1_.monitor_->setError();
+  timer_cb_();
+  config.mutable_actions(0)->mutable_triggers(0)->mutable_threshold()->set_value(0.7);
+  ASSERT_TRUE(update(*manager, config).ok());
+  EXPECT_TRUE(
+      manager->getThreadLocalOverloadState().getState(config.actions(0).name()).isSaturated());
+  manager->stop();
+}
+
+TEST_F(DynamicOverloadManagerTest, UpdatesSynchronousFeedbackTriggers) {
+  auto config = dynamicConfig();
+  auto* monitor = config.add_resource_monitors();
+  monitor->set_name(sf_factory1_.name());
+  ASSERT_TRUE(monitor->mutable_typed_config()->PackFrom(Protobuf::DoubleValue()));
+  auto* trigger = config.mutable_loadshed_points(0)->mutable_triggers(0);
+  trigger->set_name(sf_factory1_.name());
+  auto manager = createOverloadManager(config);
+  manager->start();
+  auto* point = manager->getLoadShedPoint(config.loadshed_points(0).name());
+  EXPECT_CALL(*sf_factory1_.monitor_, getResourceUsage())
+      .Times(2)
+      .WillRepeatedly(Return(ResourceUsage{0.8}));
+  EXPECT_CALL(*sf_factory1_.monitor_, onLoadAccepted(config.loadshed_points(0).name()));
+  EXPECT_FALSE(point->shouldShedLoad());
+  trigger->mutable_threshold()->set_value(0.7);
+  ASSERT_TRUE(update(*manager, config).ok());
+  EXPECT_TRUE(point->shouldShedLoad());
+  manager->stop();
+}
 
 TEST_F(OverloadManagerImplTest, CallbackOnlyFiresWhenStateChanges) {
   setDispatcherExpectation();
