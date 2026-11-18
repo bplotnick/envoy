@@ -57,6 +57,7 @@ class MockSynchronousFeedbackResourceMonitor : public SynchronousFeedbackResourc
 public:
   MOCK_METHOD(ResourceUsage, getResourceUsage, (), (override));
   MOCK_METHOD(void, onLoadAccepted, (absl::string_view), (override));
+  std::shared_ptr<int> lifetime_ = std::make_shared<int>(0);
 };
 
 class FakeResourceMonitor : public ResourceMonitor {
@@ -444,7 +445,7 @@ TEST_F(DynamicOverloadManagerTest, UpdatesTriggersAndPreservesLoadShedPointAddre
   config.mutable_actions(0)->mutable_triggers(0)->mutable_threshold()->set_value(0.7);
   config.mutable_loadshed_points(0)->mutable_triggers(0)->mutable_threshold()->set_value(0.7);
   config.mutable_refresh_interval()->set_seconds(2);
-  EXPECT_CALL(*timer_, enableTimer(std::chrono::milliseconds(2000), _)).Times(2);
+  EXPECT_CALL(*timer_, enableTimer(std::chrono::milliseconds(2000), _));
   ASSERT_TRUE(update(*manager, config).ok());
   EXPECT_TRUE(active);
   EXPECT_TRUE(
@@ -489,7 +490,7 @@ TEST_F(DynamicOverloadManagerTest, RejectsChangesToStartupConfiguration) {
   auto manager = createOverloadManager(config);
   auto changed = config;
   changed.mutable_resource_monitors()->RemoveLast();
-  EXPECT_FALSE(update(*manager, changed).ok());
+  EXPECT_FALSE(update(*manager, changed).ok()); // Still referenced by a trigger.
   changed = config;
   changed.mutable_actions(0)->set_name("different");
   EXPECT_FALSE(update(*manager, changed).ok());
@@ -591,10 +592,23 @@ TEST_F(DynamicOverloadManagerTest, AcceptsUpdateBeforeStart) {
 TEST_F(DynamicOverloadManagerTest, OmittedRefreshIntervalUsesDefault) {
   setDispatcherExpectation();
   auto config = dynamicConfig();
+  config.mutable_refresh_interval()->set_seconds(2);
   auto manager = createOverloadManager(config);
   manager->start();
   config.clear_refresh_interval();
   EXPECT_CALL(*timer_, enableTimer(std::chrono::milliseconds(1000), _));
+  ASSERT_TRUE(update(*manager, config).ok());
+  manager->stop();
+}
+
+TEST_F(DynamicOverloadManagerTest, DiscoveryUpdatesDoNotPostponePolling) {
+  setDispatcherExpectation();
+  auto config = dynamicConfig();
+  auto manager = createOverloadManager(config);
+  manager->start();
+  EXPECT_CALL(*timer_, enableTimer(_, _)).Times(0);
+  config.mutable_actions(0)->mutable_triggers(0)->mutable_threshold()->set_value(0.7);
+  ASSERT_TRUE(update(*manager, config).ok());
   ASSERT_TRUE(update(*manager, config).ok());
   manager->stop();
 }
@@ -671,6 +685,337 @@ TEST_F(DynamicOverloadManagerTest, UpdatesSynchronousFeedbackTriggers) {
   trigger->mutable_threshold()->set_value(0.7);
   ASSERT_TRUE(update(*manager, config).ok());
   EXPECT_TRUE(point->shouldShedLoad());
+  manager->stop();
+}
+
+TEST_F(DynamicOverloadManagerTest, AddsRemovesAndReaddsActionWithCachedState) {
+  auto config = dynamicConfig();
+  const auto action = config.actions(0);
+  config.clear_actions();
+  auto manager = createOverloadManager(config);
+  unsigned callbacks = 0;
+  bool active = false;
+  ASSERT_TRUE(
+      manager->registerForAction(action.name(), dispatcher_, [&](OverloadActionState state) {
+        active = state.isSaturated();
+        ++callbacks;
+      }));
+  manager->start();
+  const auto& state = manager->getThreadLocalOverloadState().getState(action.name());
+  factory1_.monitor_->setPressure(0.95);
+  timer_cb_();
+  EXPECT_FALSE(state.isSaturated());
+  *config.add_actions() = action;
+  ASSERT_TRUE(update(*manager, config).ok());
+  EXPECT_TRUE(state.isSaturated());
+  EXPECT_TRUE(active);
+  EXPECT_EQ(1, callbacks);
+  config.clear_actions();
+  ASSERT_TRUE(update(*manager, config, true).ok());
+  EXPECT_FALSE(state.isSaturated());
+  EXPECT_FALSE(active);
+  EXPECT_EQ(2, callbacks);
+  EXPECT_EQ(
+      0,
+      stats_.gauge("overload." + action.name() + ".active", Stats::Gauge::ImportMode::NeverImport)
+          .value());
+  *config.add_actions() = action;
+  ASSERT_TRUE(update(*manager, config).ok());
+  EXPECT_TRUE(state.isSaturated());
+  EXPECT_EQ(3, callbacks);
+  manager->stop();
+}
+
+TEST_F(DynamicOverloadManagerTest, AddsMonitorsAfterStartingWithNone) {
+  auto config = dynamicConfig();
+  auto initial = config;
+  initial.clear_resource_monitors();
+  initial.clear_actions();
+  initial.clear_loadshed_points();
+  config.clear_loadshed_points();
+  auto manager = createOverloadManager(initial);
+  manager->start();
+  const auto& state = manager->getThreadLocalOverloadState().getState(config.actions(0).name());
+  ASSERT_TRUE(update(*manager, config).ok());
+  factory1_.monitor_->setPressure(0.95);
+  timer_cb_();
+  EXPECT_TRUE(state.isSaturated());
+  ASSERT_TRUE(update(*manager, initial).ok());
+  EXPECT_FALSE(state.isSaturated());
+  timer_cb_();
+  ASSERT_TRUE(update(*manager, config).ok());
+  timer_cb_();
+  EXPECT_FALSE(state.isSaturated()); // New monitors have no old pressure.
+  manager->stop();
+}
+
+TEST_F(DynamicOverloadManagerTest, InactiveActionAdditionAndRemovalDoNotRepeatCallbacks) {
+  auto config = dynamicConfig();
+  auto initial = config;
+  initial.clear_actions();
+  auto manager = createOverloadManager(initial);
+  unsigned callbacks = 0;
+  manager->registerForAction(config.actions(0).name(), dispatcher_,
+                             [&](OverloadActionState) { ++callbacks; });
+  manager->start();
+  ASSERT_TRUE(update(*manager, config).ok());
+  ASSERT_TRUE(update(*manager, initial).ok());
+  EXPECT_EQ(0, callbacks);
+  manager->stop();
+}
+
+TEST_F(DynamicOverloadManagerTest, ReplacesMonitorAndIgnoresRetiredMeasurement) {
+  auto config = dynamicConfig();
+  auto manager = createOverloadManager(config);
+  manager->start();
+  auto* previous = factory1_.monitor_;
+  previous->setPressure(0.95);
+  timer_cb_();
+  const auto& state = manager->getThreadLocalOverloadState().getState(config.actions(0).name());
+  ASSERT_TRUE(state.isSaturated());
+  previous->setUpdateAsync(true);
+  timer_cb_();
+  Protobuf::Struct replacement;
+  (*replacement.mutable_fields())["generation"].set_number_value(2);
+  ASSERT_TRUE(config.mutable_resource_monitors(0)->mutable_typed_config()->PackFrom(replacement));
+  ASSERT_TRUE(update(*manager, config).ok());
+  ASSERT_NE(previous, factory1_.monitor_);
+  EXPECT_FALSE(state.isSaturated());
+  factory1_.monitor_->setPressure(0.1);
+  timer_cb_();
+  previous->publishUpdate();
+  EXPECT_FALSE(state.isSaturated());
+  EXPECT_EQ(10, stats_
+                    .gauge("overload." + factory1_.name() + ".pressure",
+                           Stats::Gauge::ImportMode::NeverImport)
+                    .value());
+  ASSERT_TRUE(update(*manager, config).ok());
+  EXPECT_EQ(2, factory1_.monitors_.size()); // Identical config reuses the new monitor.
+  manager->stop();
+}
+
+TEST_F(DynamicOverloadManagerTest, RemovesPendingMonitorAndIgnoresRetiredFailure) {
+  auto config = dynamicConfig();
+  auto manager = createOverloadManager(config);
+  manager->start();
+  auto* retired = factory4_.monitor_;
+  retired->setUpdateAsync(true);
+  retired->setError();
+  timer_cb_();
+  config.mutable_resource_monitors()->RemoveLast();
+  config.mutable_actions(0)->mutable_triggers()->RemoveLast();
+  ASSERT_TRUE(update(*manager, config).ok());
+  retired->publishUpdate();
+  EXPECT_EQ(0, stats_.counter("overload." + factory4_.name() + ".failed_updates").value());
+  timer_cb_();
+  manager->stop();
+}
+
+TEST_F(DynamicOverloadManagerTest, RejectedMonitorReplacementPreservesMeasurements) {
+  auto config = dynamicConfig();
+  auto manager = createOverloadManager(config);
+  manager->start();
+  factory1_.monitor_->setPressure(0.95);
+  timer_cb_();
+  auto* previous = factory1_.monitor_;
+  const auto& state = manager->getThreadLocalOverloadState().getState(config.actions(0).name());
+  auto* monitor = config.add_resource_monitors();
+  monitor->set_name(sf_factory1_.name());
+  ASSERT_TRUE(monitor->mutable_typed_config()->PackFrom(Protobuf::DoubleValue()));
+  sf_factory1_.status_ = absl::InvalidArgumentError("factory rejected config");
+  EXPECT_FALSE(update(*manager, config).ok());
+  EXPECT_TRUE(state.isSaturated());
+  EXPECT_EQ(previous, factory1_.monitor_);
+  config.mutable_resource_monitors()->RemoveLast();
+  config.mutable_resource_monitors(0)->mutable_typed_config()->set_type_url("unknown");
+  EXPECT_FALSE(update(*manager, config).ok());
+  EXPECT_TRUE(state.isSaturated());
+  timer_cb_();
+  EXPECT_TRUE(state.isSaturated());
+  manager->stop();
+}
+
+TEST_F(DynamicOverloadManagerTest, RejectsDuplicateMonitorsAndActions) {
+  const auto config = dynamicConfig();
+  auto manager = createOverloadManager(config);
+  auto changed = config;
+  *changed.add_resource_monitors() = config.resource_monitors(0);
+  EXPECT_FALSE(update(*manager, changed).ok());
+  changed = config;
+  *changed.add_actions() = config.actions(0);
+  EXPECT_FALSE(update(*manager, changed).ok());
+}
+
+TEST_F(DynamicOverloadManagerTest, PreservesProactiveReservationsAndRejectsReconfiguration) {
+  auto config = parseConfig(proactiveResourceConfig);
+  config.set_name("overload");
+  auto manager = createOverloadManager(config);
+  manager->start();
+  auto& state = manager->getThreadLocalOverloadState();
+  const auto resource = OverloadProactiveResourceName::GlobalDownstreamMaxConnections;
+  ASSERT_TRUE(state.tryAllocateResource(resource, 2));
+  auto* monitor = factory5_.monitor_;
+  config.mutable_refresh_interval()->set_seconds(2);
+  ASSERT_TRUE(update(*manager, config).ok());
+  EXPECT_EQ(monitor, factory5_.monitor_);
+  EXPECT_EQ(2, monitor->currentResourceUsage());
+  Protobuf::BoolValue changed;
+  changed.set_value(true);
+  ASSERT_TRUE(config.mutable_resource_monitors(1)->mutable_typed_config()->PackFrom(changed));
+  EXPECT_FALSE(update(*manager, config).ok());
+  config.mutable_resource_monitors()->RemoveLast();
+  config.clear_actions();
+  EXPECT_FALSE(update(*manager, config).ok());
+  EXPECT_TRUE(state.tryDeallocateResource(resource, 2));
+  manager->stop();
+}
+
+TEST_F(DynamicOverloadManagerTest, RejectsConflictingTimerActionsAndMissingBufferFactory) {
+  auto config = dynamicConfig();
+  auto manager = createOverloadManager(config);
+  config.mutable_actions(0)->set_name(OverloadActionNames::get().ResetStreams);
+  EXPECT_FALSE(update(*manager, config).ok());
+  config.mutable_actions(0)->set_name(OverloadActionNames::get().ReduceTimeouts);
+  EXPECT_FALSE(update(*manager, config).ok());
+  envoy::config::overload::v3::ScaleTimersOverloadActionConfig scale;
+  auto* minimum = scale.add_timer_scale_factors();
+  minimum->set_timer(
+      envoy::config::overload::v3::ScaleTimersOverloadActionConfig::HTTP_DOWNSTREAM_STREAM_IDLE);
+  minimum->mutable_min_scale()->set_value(20);
+  ASSERT_TRUE(config.mutable_actions(0)->mutable_typed_config()->PackFrom(scale));
+  const auto duplicate = config.actions(0);
+  *config.add_actions() = duplicate;
+  config.mutable_actions(1)->set_name("custom_timer_action");
+  EXPECT_FALSE(update(*manager, config).ok());
+  config.mutable_actions()->RemoveLast();
+  ASSERT_TRUE(update(*manager, config).ok());
+}
+
+TEST_F(DynamicOverloadManagerTest, ReplacesSynchronousFeedbackMonitorBehindCachedPoint) {
+  auto config = dynamicConfig();
+  auto* monitor = config.add_resource_monitors();
+  monitor->set_name(sf_factory1_.name());
+  ASSERT_TRUE(monitor->mutable_typed_config()->PackFrom(Protobuf::DoubleValue()));
+  config.mutable_loadshed_points(0)->mutable_triggers(0)->set_name(sf_factory1_.name());
+  auto manager = createOverloadManager(config);
+  manager->start();
+  auto* point = manager->getLoadShedPoint(config.loadshed_points(0).name());
+  auto* previous = sf_factory1_.monitor_;
+  std::weak_ptr<int> lifetime = previous->lifetime_;
+  EXPECT_CALL(*previous, getResourceUsage()).WillOnce(Return(ResourceUsage{1.0}));
+  EXPECT_TRUE(point->shouldShedLoad());
+  Protobuf::DoubleValue value;
+  value.set_value(2);
+  ASSERT_TRUE(config.mutable_resource_monitors(4)->mutable_typed_config()->PackFrom(value));
+  ASSERT_TRUE(update(*manager, config).ok());
+  ASSERT_NE(previous, sf_factory1_.monitor_);
+  EXPECT_EQ(point, manager->getLoadShedPoint(config.loadshed_points(0).name()));
+  EXPECT_FALSE(lifetime.expired());
+  EXPECT_CALL(*sf_factory1_.monitor_, getResourceUsage())
+      .Times(2)
+      .WillRepeatedly(Return(ResourceUsage{0.1}));
+  EXPECT_CALL(*sf_factory1_.monitor_, onLoadAccepted(config.loadshed_points(0).name()));
+  EXPECT_FALSE(point->shouldShedLoad());
+  timer_cb_();
+  EXPECT_TRUE(lifetime.expired());
+  lifetime = sf_factory1_.monitor_->lifetime_;
+  value.set_value(3);
+  ASSERT_TRUE(config.mutable_resource_monitors(4)->mutable_typed_config()->PackFrom(value));
+  ASSERT_TRUE(update(*manager, config).ok());
+  manager->stop();
+  // stop() runs before workers are joined. Destruction must wait until the manager is destroyed.
+  EXPECT_FALSE(lifetime.expired());
+  manager.reset();
+  EXPECT_TRUE(lifetime.expired());
+}
+
+TEST_F(DynamicOverloadManagerTest, ChangesShrinkHeapTypedConfigurationWithoutStateChange) {
+  auto config = dynamicConfig();
+  config.mutable_actions(0)->set_name(OverloadActionNames::get().ShrinkHeap);
+  auto manager = createOverloadManager(config);
+  unsigned callbacks = 0;
+  manager->registerForAction(config.actions(0).name(), dispatcher_,
+                             [&](OverloadActionState) { ++callbacks; });
+  manager->start();
+  envoy::config::overload::v3::ShrinkHeapConfig shrink;
+  shrink.mutable_timer_interval()->set_seconds(3);
+  shrink.mutable_max_unfreed_memory_bytes()->set_value(1024);
+  ASSERT_TRUE(config.mutable_actions(0)->mutable_typed_config()->PackFrom(shrink));
+  ASSERT_TRUE(update(*manager, config).ok());
+  ASSERT_TRUE(manager->getShrinkHeapConfig().has_value());
+  EXPECT_EQ(3, manager->getShrinkHeapConfig()->timer_interval().seconds());
+  EXPECT_EQ(1, callbacks);
+  config.mutable_actions(0)->clear_typed_config();
+  ASSERT_TRUE(update(*manager, config).ok());
+  EXPECT_FALSE(manager->getShrinkHeapConfig().has_value());
+  EXPECT_EQ(2, callbacks);
+  manager->stop();
+}
+
+TEST_F(DynamicOverloadManagerTest, ReconfiguresExistingTimerAndMovesItBetweenActions) {
+  auto config = dynamicConfig();
+  auto manager = createOverloadManager(config);
+  NiceMock<Event::MockDispatcher> timer_dispatcher;
+  auto timers = manager->scaledTimerFactory()(timer_dispatcher);
+  manager->start();
+  const auto action = config.actions(0);
+  factory1_.monitor_->setPressure(0.95);
+  timer_cb_();
+  auto timer = timers->createTimer(TimerType::HttpDownstreamIdleStreamTimeout, [] {});
+  EXPECT_FALSE(timer->enabled());
+  timer->disableTimer();
+  auto* minimum_timer = new NiceMock<Event::MockTimer>();
+  EXPECT_CALL(timer_dispatcher, createTimer_(_)).WillOnce(Return(minimum_timer));
+  EXPECT_CALL(*minimum_timer, enableTimer(std::chrono::milliseconds(100), _)).Times(2);
+  timer->enableTimer(std::chrono::milliseconds(100), nullptr);
+  EXPECT_TRUE(timer->enabled());
+  timer->disableTimer();
+  // Re-enabling an unchanged timer reuses its underlying event.
+  timer->enableHRTimer(std::chrono::microseconds(100000), nullptr);
+  timer->disableTimer();
+
+  auto* named = config.add_actions();
+  *named = action;
+  named->set_name("custom_timer_action");
+  envoy::config::overload::v3::ScaleTimersOverloadActionConfig scale;
+  auto* minimum = scale.add_timer_scale_factors();
+  minimum->set_timer(
+      envoy::config::overload::v3::ScaleTimersOverloadActionConfig::HTTP_DOWNSTREAM_STREAM_IDLE);
+  minimum->mutable_min_timeout()->set_nanos(20000000);
+  ASSERT_TRUE(named->mutable_typed_config()->PackFrom(scale));
+  ASSERT_TRUE(update(*manager, config).ok());
+  minimum_timer = new NiceMock<Event::MockTimer>();
+  EXPECT_CALL(timer_dispatcher, createTimer_(_)).WillOnce(Return(minimum_timer));
+  EXPECT_CALL(*minimum_timer, enableTimer(std::chrono::milliseconds(20), _));
+  timer->enableTimer(std::chrono::milliseconds(100), nullptr);
+  timer->disableTimer();
+
+  config.mutable_actions(1)->set_name(OverloadActionNames::get().ReduceTimeouts);
+  minimum->mutable_min_timeout()->set_nanos(40000000);
+  ASSERT_TRUE(config.mutable_actions(1)->mutable_typed_config()->PackFrom(scale));
+  ASSERT_TRUE(update(*manager, config).ok());
+  minimum_timer = new NiceMock<Event::MockTimer>();
+  EXPECT_CALL(timer_dispatcher, createTimer_(_)).WillOnce(Return(minimum_timer));
+  EXPECT_CALL(*minimum_timer, enableTimer(std::chrono::milliseconds(40), _));
+  timer->enableTimer(std::chrono::milliseconds(100), nullptr);
+  timer->disableTimer();
+
+  config.mutable_actions()->RemoveLast();
+  ASSERT_TRUE(update(*manager, config).ok());
+  minimum_timer = new NiceMock<Event::MockTimer>();
+  EXPECT_CALL(timer_dispatcher, createTimer_(_)).WillOnce(Return(minimum_timer));
+  EXPECT_CALL(*minimum_timer, enableTimer(std::chrono::milliseconds(100), _));
+  timer->enableTimer(std::chrono::milliseconds(100), nullptr);
+  timer->disableTimer();
+  // Explicit minimums retain their original interface when dynamic configuration is enabled.
+  auto* explicit_minimum_timer = new NiceMock<Event::MockTimer>();
+  EXPECT_CALL(timer_dispatcher, createTimer_(_)).WillOnce(Return(explicit_minimum_timer));
+  auto explicit_timer =
+      timers->createTimer(Event::ScaledTimerMinimum(Event::ScaledMinimum(UnitFloat(0.5))), [] {});
+  timers->setScaleFactor(UnitFloat(0.5));
+  EXPECT_CALL(*explicit_minimum_timer, enableTimer(std::chrono::milliseconds(50), _));
+  explicit_timer->enableTimer(std::chrono::milliseconds(100), nullptr);
+  explicit_timer->disableTimer();
   manager->stop();
 }
 

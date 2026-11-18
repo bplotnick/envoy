@@ -156,6 +156,35 @@ TEST_F(HeapShrinkerTest, NoConfigUsesDefaults) {
   EXPECT_EQ(1, shrink_count.value());
 }
 
+TEST_F(HeapShrinkerTest, UpdatesConfigurationAndRestoresDefaults) {
+  Server::OverloadActionCb action_cb;
+  std::optional<envoy::config::overload::v3::ShrinkHeapConfig> config;
+  EXPECT_CALL(overload_manager_, getShrinkHeapConfig()).WillRepeatedly([&] { return config; });
+  EXPECT_CALL(overload_manager_, registerForAction(_, _, _))
+      .WillOnce([&](const std::string&, Event::Dispatcher&, Server::OverloadActionCb cb) {
+        action_cb = cb;
+        return true;
+      });
+  HeapShrinker shrinker(dispatcher_, overload_manager_, *stats_.rootScope());
+  auto& count = stats_.counter("overload.envoy.overload_actions.shrink_heap.shrink_count");
+  config.emplace();
+  config->mutable_timer_interval()->set_seconds(2);
+  config->mutable_max_unfreed_memory_bytes()->set_value(1024);
+  action_cb(Server::OverloadActionState::saturated());
+  time_system_.advanceTimeAndRun(std::chrono::seconds(2), dispatcher_,
+                                 Event::Dispatcher::RunType::NonBlock);
+  EXPECT_EQ(1, count.value());
+
+  config.reset();
+  action_cb(Server::OverloadActionState::saturated());
+  time_system_.advanceTimeAndRun(std::chrono::seconds(2), dispatcher_,
+                                 Event::Dispatcher::RunType::NonBlock);
+  EXPECT_EQ(1, count.value());
+  time_system_.advanceTimeAndRun(std::chrono::seconds(8), dispatcher_,
+                                 Event::Dispatcher::RunType::NonBlock);
+  EXPECT_EQ(2, count.value());
+}
+
 } // namespace
 } // namespace Memory
 } // namespace Envoy

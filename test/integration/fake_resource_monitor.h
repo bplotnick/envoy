@@ -44,12 +44,12 @@ public:
     return "envoy.resource_monitors.testonly.fake_resource_monitor";
   }
 
-  FakeResourceMonitor* monitor() const { return monitor_; }
+  FakeResourceMonitor* monitor() const { return monitor_.load(std::memory_order_acquire); }
   const std::vector<FakeResourceMonitor*>& monitors() const { return monitors_; }
-  void onMonitorDestroyed();
+  void onMonitorDestroyed(FakeResourceMonitor* monitor);
 
 private:
-  FakeResourceMonitor* monitor_{nullptr};
+  std::atomic<FakeResourceMonitor*> monitor_{nullptr};
   std::vector<FakeResourceMonitor*> monitors_;
 };
 
@@ -100,9 +100,9 @@ public:
   }
 
   FakeSynchronousFeedbackResourceMonitor* monitor() const {
-    return monitor_.load(std::memory_order_relaxed);
+    return monitor_.load(std::memory_order_acquire);
   }
-  void onMonitorDestroyed();
+  void onMonitorDestroyed(FakeSynchronousFeedbackResourceMonitor* monitor);
 
 private:
   std::atomic<FakeSynchronousFeedbackResourceMonitor*> monitor_{nullptr};

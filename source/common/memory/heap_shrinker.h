@@ -22,6 +22,7 @@ public:
 
 private:
   void shrinkHeap();
+  void updateConfig(Server::OverloadManager& overload_manager);
 
   bool active_{false};
   Envoy::Stats::Counter* shrink_counter_;

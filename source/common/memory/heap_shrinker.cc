@@ -18,21 +18,14 @@ HeapShrinker::HeapShrinker(Event::Dispatcher& dispatcher, Server::OverloadManage
                            Stats::Scope& stats)
     : timer_interval_(kDefaultTimerInterval),
       max_unfreed_memory_bytes_(kDefaultMaxUnfreedMemoryBytes) {
-  const auto shrink_heap_config = overload_manager.getShrinkHeapConfig();
-  if (shrink_heap_config.has_value()) {
-    if (shrink_heap_config->has_timer_interval()) {
-      timer_interval_ = std::chrono::milliseconds(
-          DurationUtil::durationToMilliseconds(shrink_heap_config->timer_interval()));
-    }
-    if (shrink_heap_config->has_max_unfreed_memory_bytes()) {
-      max_unfreed_memory_bytes_ = shrink_heap_config->max_unfreed_memory_bytes().value();
-    }
-  }
+  updateConfig(overload_manager);
 
   const auto action_name = Server::OverloadActionNames::get().ShrinkHeap;
   if (overload_manager.registerForAction(
-          action_name, dispatcher,
-          [this](Server::OverloadActionState state) { active_ = state.isSaturated(); })) {
+          action_name, dispatcher, [this, &overload_manager](Server::OverloadActionState state) {
+            active_ = state.isSaturated();
+            updateConfig(overload_manager);
+          })) {
     Envoy::Stats::StatNameManagedStorage stat_name(
         absl::StrCat("overload.", action_name, ".shrink_count"), stats.symbolTable());
     shrink_counter_ = &stats.counterFromStatName(stat_name.statName());
@@ -40,6 +33,25 @@ HeapShrinker::HeapShrinker(Event::Dispatcher& dispatcher, Server::OverloadManage
       shrinkHeap();
       timer_->enableTimer(timer_interval_);
     });
+    timer_->enableTimer(timer_interval_);
+  }
+}
+
+void HeapShrinker::updateConfig(Server::OverloadManager& overload_manager) {
+  const auto old_interval = timer_interval_;
+  timer_interval_ = kDefaultTimerInterval;
+  max_unfreed_memory_bytes_ = kDefaultMaxUnfreedMemoryBytes;
+  const auto config = overload_manager.getShrinkHeapConfig();
+  if (config) {
+    if (config->has_timer_interval()) {
+      timer_interval_ =
+          std::chrono::milliseconds(DurationUtil::durationToMilliseconds(config->timer_interval()));
+    }
+    if (config->has_max_unfreed_memory_bytes()) {
+      max_unfreed_memory_bytes_ = config->max_unfreed_memory_bytes().value();
+    }
+  }
+  if (timer_ && old_interval != timer_interval_) {
     timer_->enableTimer(timer_interval_);
   }
 }

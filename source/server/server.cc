@@ -418,6 +418,11 @@ absl::Status InstanceUtil::loadBootstrapConfig(
     bootstrap.MergeFrom(config_proto);
   }
   MessageUtil::validate(bootstrap, validation_visitor);
+  if (bootstrap.has_overload_manager() && !bootstrap.overload_manager().has_config_source() &&
+      bootstrap.overload_manager().resource_monitors().empty()) {
+    return absl::InvalidArgumentError(
+        "Static overload manager configuration requires at least one resource monitor");
+  }
   absl::SetFlag(&FLAGS_breaking_change_observability_enabled,
                 bootstrap.enable_breaking_changes_observability());
   return absl::OkStatus();

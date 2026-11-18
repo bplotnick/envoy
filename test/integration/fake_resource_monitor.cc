@@ -2,7 +2,7 @@
 
 namespace Envoy {
 
-FakeResourceMonitor::~FakeResourceMonitor() { factory_.onMonitorDestroyed(); }
+FakeResourceMonitor::~FakeResourceMonitor() { factory_.onMonitorDestroyed(this); }
 
 void FakeResourceMonitor::updateResourceUsage(Server::ResourceUpdateCallbacks& callbacks) {
   Server::ResourceUsage usage;
@@ -10,7 +10,11 @@ void FakeResourceMonitor::updateResourceUsage(Server::ResourceUpdateCallbacks& c
   callbacks.onSuccess(usage);
 }
 
-void FakeResourceMonitorFactory::onMonitorDestroyed() { monitor_ = nullptr; }
+void FakeResourceMonitorFactory::onMonitorDestroyed(FakeResourceMonitor* monitor) {
+  if (monitor_ == monitor) {
+    monitor_ = nullptr;
+  }
+}
 
 absl::StatusOr<Server::ResourceMonitorPtr> FakeResourceMonitorFactory::createResourceMonitor(
     const Protobuf::Message&, Server::Configuration::ResourceMonitorFactoryContext& context) {
@@ -21,10 +25,15 @@ absl::StatusOr<Server::ResourceMonitorPtr> FakeResourceMonitorFactory::createRes
 }
 
 FakeSynchronousFeedbackResourceMonitor::~FakeSynchronousFeedbackResourceMonitor() {
-  factory_.onMonitorDestroyed();
+  factory_.onMonitorDestroyed(this);
 }
 
-void FakeSynchronousFeedbackResourceMonitorFactory::onMonitorDestroyed() { monitor_ = nullptr; }
+void FakeSynchronousFeedbackResourceMonitorFactory::onMonitorDestroyed(
+    FakeSynchronousFeedbackResourceMonitor* monitor) {
+  if (monitor_ == monitor) {
+    monitor_ = nullptr;
+  }
+}
 
 absl::StatusOr<Server::ResourceMonitorPtr>
 FakeSynchronousFeedbackResourceMonitorFactory::createResourceMonitor(
