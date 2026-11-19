@@ -96,11 +96,13 @@ public:
   /**
    * Register a callback to be invoked when the specified overload action changes state
    * (i.e., becomes activated or inactivated). Must be called before the start method is called.
+   * Updates to an action's typed configuration may also invoke its callback without a state change.
    * @param action const std::string& the name of the overload action to register for
    * @param dispatcher Event::Dispatcher& the dispatcher on which callbacks will be posted
    * @param callback OverloadActionCb the callback to post when the overload action
    *        changes state
-   * @returns true if action was registered and false if no such action has been configured
+   * @returns true if action was registered. With dynamic configuration, registrations are retained
+   *          for actions that may be added later. Otherwise returns false for unconfigured actions.
    */
   virtual bool registerForAction(const std::string& action, Event::Dispatcher& dispatcher,
                                  OverloadActionCb callback) PURE;

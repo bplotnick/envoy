@@ -48,8 +48,8 @@ TCP connections when memory usage reaches 95% (configured via
 Dynamic configuration
 ---------------------
 
-The overload discovery service (ODDS) can update the refresh interval and the triggers of
-configured overload actions and load shed points without restarting Envoy. Set
+The overload discovery service (ODDS) can update resource monitors, overload actions, the refresh
+interval, and load shed point triggers without restarting Envoy. Set
 :ref:`config_source <envoy_v3_api_field_config.overload.v3.OverloadManager.config_source>` and
 :ref:`name <envoy_v3_api_field_config.overload.v3.OverloadManager.name>` in the bootstrap
 overload manager configuration. For example, add the following fields to the configuration above
@@ -69,12 +69,22 @@ Dedicated gRPC (state of the world or delta), REST, ADS, and filesystem configur
 supported. The dedicated service is
 :ref:`OverloadDiscoveryService <envoy_v3_api_file_envoy/service/overload/v3/odds.proto>`.
 
-Updates may change ``refresh_interval`` and the ``triggers`` of existing actions and load shed
-points, including switching between threshold and scaled triggers or referencing another configured
-resource. Resource monitors, action names and typed configurations, load shed point names, buffer
-factory configuration, and the ordering of these lists must match the bootstrap configuration.
-Changes to those fields require a restart. The effective refresh interval must be at least one
-millisecond; omitting it selects the default of one second.
+With dynamic configuration, the bootstrap monitor and action lists may be empty. An explicitly
+configured static overload manager still requires at least one resource monitor.
+
+Updates may add, remove, or reconfigure regular and synchronous feedback resource monitors and
+overload actions, including their typed configurations. Removing an action clears its active state
+on existing workers; re-adding it restores its registered callbacks. Unchanged monitors retain
+their latest measurements. Added or replaced monitors start without a cached measurement, and
+late results from removed or replaced monitors are ignored.
+
+Updates may also change ``refresh_interval`` and the ``triggers`` of existing load shed points,
+including switching between threshold and scaled triggers or referencing another configured
+resource. Proactive resource monitors (including the downstream connection limit), load shed point
+names and their ordering, and buffer factory configuration must match the bootstrap configuration.
+Changes to those fields require a restart. Timer minimum changes take effect when existing timers
+are next enabled; scale factor changes also apply to enabled timers. The effective refresh interval
+must be at least one millisecond; omitting it selects the default of one second.
 
 Envoy starts with the bootstrap settings and does not wait for the first ODDS response before
 starting workers. Valid updates are evaluated using the most recent successful resource measurements.

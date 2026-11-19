@@ -235,8 +235,8 @@ message OverloadManager {
   // The interval for refreshing resource usage.
   google.protobuf.Duration refresh_interval = 1;
 
-  // The set of resources to monitor.
-  repeated ResourceMonitor resource_monitors = 2 [(validate.rules).repeated = {min_items: 1}];
+  // The set of resources to monitor. This may be empty with dynamic configuration.
+  repeated ResourceMonitor resource_monitors = 2;
 
   // The set of overload actions.
   repeated OverloadAction actions = 3;
@@ -248,9 +248,10 @@ message OverloadManager {
   BufferFactoryConfig buffer_factory_config = 4;
 
   // Optional source of dynamic overload configuration. The bootstrap configuration remains
-  // active until a valid update arrives. Updates may change the refresh interval and action
-  // and load shed point triggers. Resource monitors, action names and typed configurations,
-  // load shed point names, and buffer factory configuration must match the bootstrap.
+  // active until a valid update arrives. Updates may add, remove, and reconfigure regular
+  // resource monitors and actions, and change the refresh interval and load shed point triggers.
+  // Proactive resource monitors, load shed point names, and buffer factory configuration must
+  // match the bootstrap. Timer minimum changes take effect when a timer is next enabled.
   // Rejected updates and resource removal retain the last accepted configuration.
   // This field is only set in the bootstrap configuration, not in discovered resources.
   core.v3.ConfigSource config_source = 6;

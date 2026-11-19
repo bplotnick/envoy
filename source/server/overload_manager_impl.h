@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <functional>
 #include <vector>
 
 #include "envoy/api/api.h"
@@ -19,6 +20,7 @@
 #include "source/common/common/logger.h"
 #include "source/common/config/resource_type_helper.h"
 #include "source/common/event/scaled_range_timer_manager_impl.h"
+#include "source/server/resource_monitor_config_impl.h"
 #include "source/server/synchronous_feedback_trigger.h"
 #include "source/server/trigger.h"
 
@@ -44,6 +46,10 @@ public:
   // Returns the current action state, which is the max state across all registered triggers.
   OverloadActionState getState() const;
   void publishStats();
+  void reset() {
+    state_ = OverloadActionState::inactive();
+    publishStats();
+  }
 
 private:
   OverloadAction(const envoy::config::overload::v3::OverloadAction& config,
@@ -215,12 +221,16 @@ private:
     void onFailure(const absl::Status& error) override;
 
     void update(FlushEpochId flush_epoch);
+    void retire() { retired_ = true; }
+    // Destroy monitors on the main thread after callbacks and worker snapshots have released them.
+    bool canDestroy() const { return !pending_update_ && monitor_.use_count() == 1; }
 
   private:
     const std::string name_;
     ResourceMonitorSharedPtr monitor_;
     OverloadManagerImpl& manager_;
     bool pending_update_{false};
+    bool retired_{false};
     FlushEpochId flush_epoch_;
     Stats::Gauge& pressure_gauge_;
     Stats::Counter& failed_updates_counter_;
@@ -238,6 +248,7 @@ private:
                               FlushEpochId flush_epoch);
   // Flushes any enqueued action state updates to all worker threads.
   void flushResourceUpdates();
+  void flushTimerUpdates();
   absl::Status applyConfig(const envoy::config::overload::v3::OverloadManager& config);
 
   bool started_{false};
@@ -252,7 +263,8 @@ private:
   // For the first measurement, we use the time when When the Overload Manager first starts.
   MonotonicTime time_resources_last_measured_;
   Event::TimerPtr timer_;
-  absl::node_hash_map<std::string, Resource> resources_;
+  absl::node_hash_map<std::string, std::shared_ptr<Resource>> resources_;
+  std::vector<std::shared_ptr<Resource>> retired_resources_;
   std::shared_ptr<absl::node_hash_map<OverloadProactiveResourceName, ProactiveResource>>
       proactive_resources_;
 
@@ -290,6 +302,16 @@ private:
   std::unique_ptr<Config::ResourceTypeHelper<envoy::config::overload::v3::OverloadManager>>
       resource_type_helper_;
   Config::SubscriptionPtr subscription_;
+  envoy::config::overload::v3::OverloadManager current_config_;
+  std::unique_ptr<Configuration::ResourceMonitorFactoryContextImpl> resource_monitor_context_;
+  using TimerConfiguration =
+      absl::flat_hash_map<Event::ScaledTimerType, std::pair<Event::ScaledTimerMinimum, UnitFloat>>;
+  struct TimerCallback {
+    Event::Dispatcher& dispatcher_;
+    std::function<void(const TimerConfiguration&, UnitFloat)> callback_;
+  };
+  std::vector<TimerCallback> timer_callbacks_;
+  bool timer_configuration_dirty_{true};
 };
 
 } // namespace Server

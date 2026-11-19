@@ -137,6 +137,71 @@ TEST_P(OverloadIntegrationTest, DynamicOverloadConfiguration) {
   EXPECT_EQ("200", response->headers().getStatusValue());
 }
 
+TEST_P(OverloadIntegrationTest, DynamicOverloadResourcesAndActions) {
+  setupOverloadManagerConfig(
+      TestUtility::parseYaml<envoy::config::overload::v3::OverloadAction>(R"EOF(
+      name: envoy.overload_actions.stop_accepting_requests
+      triggers:
+      - name: envoy.resource_monitors.testonly.fake_resource_monitor
+        threshold:
+          value: 0.7
+    )EOF"));
+  overload_manager_config_.set_name("overload");
+  const std::string path = TestEnvironment::temporaryPath("overload_dynamic_resources.json");
+  TestEnvironment::writeStringToFileForTest(path, "{\"resources\": []}", true);
+  auto empty = overload_manager_config_;
+  empty.clear_actions();
+  empty.clear_resource_monitors();
+  config_helper_.addConfigModifier([&](envoy::config::bootstrap::v3::Bootstrap& bootstrap) {
+    auto* overload = bootstrap.mutable_overload_manager();
+    *overload = empty;
+    overload->mutable_config_source()->mutable_path_config_source()->set_path(path);
+    overload->mutable_config_source()->set_resource_api_version(envoy::config::core::v3::V3);
+  });
+  initialize();
+  test_server_->waitForCounter("overload_manager.xds.update_success", Ge(1));
+  auto publish = [&](const envoy::config::overload::v3::OverloadManager& config,
+                     const std::string& version) {
+    envoy::service::discovery::v3::DiscoveryResponse discovery;
+    discovery.set_version_info(version);
+    discovery.set_type_url("type.googleapis.com/envoy.config.overload.v3.OverloadManager");
+    ASSERT_TRUE(discovery.add_resources()->PackFrom(config));
+    const auto previous = test_server_->counter("overload_manager.xds.update_success")->value();
+    TestEnvironment::writeStringToFileForTest(
+        path + ".tmp", MessageUtil::getJsonStringFromMessageOrError(discovery), true);
+    TestEnvironment::renameFile(path + ".tmp", path);
+    test_server_->waitForCounter("overload_manager.xds.update_success", Ge(previous + 1));
+  };
+  // Establish a connection before either the monitor or action exists. Its cached action
+  // reference must observe the action added by discovery.
+  codec_client_ = makeHttpConnection(makeClientConnection(lookupPort("http")));
+  auto response =
+      sendRequestAndWaitForResponse(default_request_headers_, 0, default_response_headers_, 0);
+  EXPECT_EQ("200", response->headers().getStatusValue());
+  publish(overload_manager_config_, "1");
+  updateResource(0.8);
+  test_server_->waitForGauge("overload.envoy.overload_actions.stop_accepting_requests.active",
+                             Eq(1));
+  response = codec_client_->makeHeaderOnlyRequest(default_request_headers_);
+  ASSERT_TRUE(response->waitForEndStream());
+  EXPECT_EQ("503", response->headers().getStatusValue());
+  codec_client_->close();
+
+  publish(empty, "2");
+  codec_client_ = makeHttpConnection(makeClientConnection(lookupPort("http")));
+  response =
+      sendRequestAndWaitForResponse(default_request_headers_, 0, default_response_headers_, 0);
+  EXPECT_EQ("200", response->headers().getStatusValue());
+  // Re-add both; the new monitor must be polled even after removing every resource.
+  publish(overload_manager_config_, "3");
+  updateResource(0.8);
+  test_server_->waitForGauge("overload.envoy.overload_actions.stop_accepting_requests.active",
+                             Eq(1));
+  response = codec_client_->makeHeaderOnlyRequest(default_request_headers_);
+  ASSERT_TRUE(response->waitForEndStream());
+  EXPECT_EQ("503", response->headers().getStatusValue());
+}
+
 TEST_P(OverloadIntegrationTest, CloseStreamsWhenOverloaded) {
   initializeOverloadManager(
       TestUtility::parseYaml<envoy::config::overload::v3::OverloadAction>(R"EOF(

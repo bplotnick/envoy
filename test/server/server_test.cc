@@ -75,6 +75,34 @@ namespace Envoy {
 namespace Server {
 namespace {
 
+TEST(ServerInstanceUtil, EmptyOverloadMonitorsRequireDynamicConfiguration) {
+  StrictMock<MockOptions> options;
+  StrictMock<Api::MockApi> api;
+  EXPECT_CALL(options, configPath()).WillRepeatedly(testing::ReturnRef(options.config_path_));
+  EXPECT_CALL(options, configYaml()).WillRepeatedly(testing::ReturnRef(options.config_yaml_));
+  EXPECT_CALL(options, configProto()).WillRepeatedly(testing::ReturnRef(options.config_proto_));
+  options.config_proto_.mutable_node()->set_id("test");
+  auto* overload = options.config_proto_.mutable_overload_manager();
+  auto load = [&] {
+    envoy::config::bootstrap::v3::Bootstrap bootstrap;
+    return InstanceUtil::loadBootstrapConfig(bootstrap, options,
+                                             ProtobufMessage::getStrictValidationVisitor(), api);
+  };
+  EXPECT_EQ("Static overload manager configuration requires at least one resource monitor",
+            load().message());
+  overload->set_name("overload");
+  overload->mutable_config_source()->mutable_ads();
+  EXPECT_OK(load());
+  overload->clear_config_source();
+  EXPECT_FALSE(load().ok());
+  auto* monitor = overload->add_resource_monitors();
+  monitor->set_name("test");
+  ASSERT_TRUE(monitor->mutable_typed_config()->PackFrom(Protobuf::DoubleValue()));
+  EXPECT_OK(load());
+  options.config_proto_.clear_overload_manager();
+  EXPECT_OK(load());
+}
+
 TEST(ServerInstanceUtil, flushHelper) {
   InSequence s;
 
