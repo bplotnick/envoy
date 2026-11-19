@@ -43,6 +43,45 @@ TCP connections when memory usage reaches 95% (configured via
             threshold:
               value: 0.95
 
+.. _config_overload_manager_dynamic:
+
+Dynamic configuration
+---------------------
+
+The overload discovery service (ODDS) can update the refresh interval and the triggers of
+configured overload actions and load shed points without restarting Envoy. Set
+:ref:`config_source <envoy_v3_api_field_config.overload.v3.OverloadManager.config_source>` and
+:ref:`name <envoy_v3_api_field_config.overload.v3.OverloadManager.name>` in the bootstrap
+overload manager configuration. For example, add the following fields to the configuration above
+to subscribe over ADS:
+
+.. code-block:: yaml
+
+   name: instance_overload
+   config_source:
+     ads: {}
+     resource_api_version: V3
+
+The control plane publishes a resource with type URL
+``type.googleapis.com/envoy.config.overload.v3.OverloadManager`` and name ``instance_overload``.
+The resource contains the complete overload manager configuration, with ``config_source`` omitted.
+Dedicated gRPC (state of the world or delta), REST, ADS, and filesystem configuration sources are
+supported. The dedicated service is
+:ref:`OverloadDiscoveryService <envoy_v3_api_file_envoy/service/overload/v3/odds.proto>`.
+
+Updates may change ``refresh_interval`` and the ``triggers`` of existing actions and load shed
+points, including switching between threshold and scaled triggers or referencing another configured
+resource. Resource monitors, action names and typed configurations, load shed point names, buffer
+factory configuration, and the ordering of these lists must match the bootstrap configuration.
+Changes to those fields require a restart. The effective refresh interval must be at least one
+millisecond; omitting it selects the default of one second.
+
+Envoy starts with the bootstrap settings and does not wait for the first ODDS response before
+starting workers. Valid updates are evaluated using the most recent successful resource measurements.
+Invalid updates are rejected and preserve the active settings. A lost connection, an empty response,
+or removal of the subscribed resource also retains the last accepted settings, preserving overload
+protection. Before the first valid update, these are the bootstrap settings.
+
 Resource monitors
 -----------------
 

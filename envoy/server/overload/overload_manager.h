@@ -7,12 +7,16 @@
 #include "envoy/config/overload/v3/overload.pb.h"
 #include "envoy/event/dispatcher.h"
 #include "envoy/event/scaled_range_timer_manager.h"
+#include "envoy/protobuf/message_validator.h"
 #include "envoy/server/overload/load_shed_point.h"
 #include "envoy/server/overload/thread_local_overload_state.h"
 
 #include "source/common/singleton/const_singleton.h"
 
 namespace Envoy {
+namespace Upstream {
+class ClusterManager;
+}
 namespace Server {
 /**
  * Well-known overload action names.
@@ -77,6 +81,12 @@ using OverloadActionStatsNames = ConstSingleton<OverloadActionStatsNameValues>;
  */
 class OverloadManager : public LoadShedPointProvider {
 public:
+  // Initialize dynamic configuration after the cluster manager is available. The bootstrap
+  // configuration provides overload protection while the subscription connects.
+  virtual absl::Status initialize(Upstream::ClusterManager&, ProtobufMessage::ValidationVisitor&) {
+    return absl::OkStatus();
+  }
+
   /**
    * Start a recurring timer to monitor resources and notify listeners when overload actions
    * change state.

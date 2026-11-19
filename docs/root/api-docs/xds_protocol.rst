@@ -31,6 +31,7 @@ The following v3 xDS resource types are supported:
 -  :ref:`envoy.config.endpoint.v3.ClusterLoadAssignment <envoy_v3_api_msg_config.endpoint.v3.ClusterLoadAssignment>`
 -  :ref:`envoy.extensions.transport_sockets.tls.v3.Secret <envoy_v3_api_msg_extensions.transport_sockets.tls.v3.Secret>`
 -  :ref:`envoy.service.runtime.v3.Runtime <envoy_v3_api_msg_service.runtime.v3.Runtime>`
+-  :ref:`envoy.config.overload.v3.OverloadManager <envoy_v3_api_msg_config.overload.v3.OverloadManager>`
 
 The concept of `type URLs <https://developers.google.com/protocol-buffers/docs/proto3#any>`_
 appears below, and takes the form ``type.googleapis.com/<resource type>`` -- e.g.,
@@ -203,6 +204,11 @@ variants. Here are the RPC services and methods for each resource type:
 
    -  SotW: RuntimeDiscoveryService.StreamRuntime
    -  Incremental: RuntimeDiscoveryService.DeltaRuntime
+
+-  Overload manager: Overload Discovery Service (ODDS)
+
+   -  SotW: OverloadDiscoveryService.StreamOverload
+   -  Incremental: OverloadDiscoveryService.DeltaOverload
 
 In the aggregated protocol variants, all resource types are multiplexed on a single gRPC stream,
 where each resource type is treated as a separate logical stream within the aggregated stream.

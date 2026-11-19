@@ -896,6 +896,8 @@ absl::Status InstanceBase::initializeOrThrow(Network::Address::InstanceConstShar
   // We have to defer RTDS initialization until after the cluster manager is
   // instantiated (which in turn relies on runtime...).
   RETURN_IF_NOT_OK(runtime().initialize(clusterManager()));
+  RETURN_IF_NOT_OK(overloadManager().initialize(
+      clusterManager(), messageValidationContext().dynamicValidationVisitor()));
 
   clusterManager().setPrimaryClustersInitializedCb(
       [this]() { onClusterManagerPrimaryInitializationComplete(); });

@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package envoy.config.overload.v3;
 
+import "envoy/config/core/v3/config_source.proto";
 import "envoy/type/v3/percent.proto";
 
 import "google/protobuf/any.proto";
@@ -226,7 +227,7 @@ message BufferFactoryConfig {
   uint32 minimum_account_to_track_power_of_two = 1 [(validate.rules).uint32 = {lte: 56 gte: 10}];
 }
 
-// [#next-free-field: 6]
+// [#next-free-field: 8]
 message OverloadManager {
   option (udpa.annotations.versioning).previous_message_type =
       "envoy.config.overload.v2alpha.OverloadManager";
@@ -245,4 +246,16 @@ message OverloadManager {
 
   // Configuration for buffer factory.
   BufferFactoryConfig buffer_factory_config = 4;
+
+  // Optional source of dynamic overload configuration. The bootstrap configuration remains
+  // active until a valid update arrives. Updates may change the refresh interval and action
+  // and load shed point triggers. Resource monitors, action names and typed configurations,
+  // load shed point names, and buffer factory configuration must match the bootstrap.
+  // Rejected updates and resource removal retain the last accepted configuration.
+  // This field is only set in the bootstrap configuration, not in discovered resources.
+  core.v3.ConfigSource config_source = 6;
+
+  // Resource name to subscribe to when ``config_source`` is set. Discovered overload manager
+  // resources must have this name. This field is required when ``config_source`` is set.
+  string name = 7;
 }

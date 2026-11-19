@@ -500,6 +500,7 @@ proto_library(
         "//envoy/service/load_stats/v3:pkg",
         "//envoy/service/metrics/v3:pkg",
         "//envoy/service/network_ext_proc/v3:pkg",
+        "//envoy/service/overload/v3:pkg",
         "//envoy/service/rate_limit_quota/v3:pkg",
         "//envoy/service/ratelimit/v3:pkg",
         "//envoy/service/redis_auth/v3:pkg",

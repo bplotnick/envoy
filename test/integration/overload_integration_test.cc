@@ -72,6 +72,71 @@ INSTANTIATE_TEST_SUITE_P(Protocols, OverloadIntegrationTest,
                              {FakeHttpConnection::Type::HTTP1, FakeHttpConnection::Type::HTTP2})),
                          HttpProtocolIntegrationTest::protocolTestParamsToString);
 
+TEST_P(OverloadIntegrationTest, DynamicOverloadConfiguration) {
+  setupOverloadManagerConfig(
+      TestUtility::parseYaml<envoy::config::overload::v3::OverloadAction>(R"EOF(
+      name: envoy.overload_actions.stop_accepting_requests
+      triggers:
+      - name: envoy.resource_monitors.testonly.fake_resource_monitor
+        threshold:
+          value: 0.9
+    )EOF"));
+  overload_manager_config_.set_name("overload");
+  const std::string config_path = TestEnvironment::temporaryPath("overload_xds.json");
+  TestEnvironment::writeStringToFileForTest(config_path, "{\"resources\": []}", true);
+  config_helper_.addConfigModifier([&](envoy::config::bootstrap::v3::Bootstrap& bootstrap) {
+    auto* overload = bootstrap.mutable_overload_manager();
+    *overload = overload_manager_config_;
+    overload->mutable_config_source()->mutable_path_config_source()->set_path(config_path);
+    overload->mutable_config_source()->set_resource_api_version(envoy::config::core::v3::V3);
+  });
+  initialize();
+  updateResource(0.8);
+  test_server_->waitForGauge(
+      "overload.envoy.resource_monitors.testonly.fake_resource_monitor.pressure", Eq(80));
+
+  auto publish = [&](const envoy::config::overload::v3::OverloadManager& config,
+                     const std::string& version) {
+    envoy::service::discovery::v3::DiscoveryResponse response;
+    response.set_version_info(version);
+    response.set_type_url("type.googleapis.com/envoy.config.overload.v3.OverloadManager");
+    ASSERT_TRUE(response.add_resources()->PackFrom(config));
+    TestEnvironment::writeStringToFileForTest(
+        config_path + ".tmp", MessageUtil::getJsonStringFromMessageOrError(response), true);
+    TestEnvironment::renameFile(config_path + ".tmp", config_path);
+  };
+
+  // The same resource usage becomes overloaded solely due to the xDS threshold update.
+  overload_manager_config_.mutable_actions(0)->mutable_triggers(0)->mutable_threshold()->set_value(
+      0.7);
+  publish(overload_manager_config_, "1");
+  test_server_->waitForGauge("overload.envoy.overload_actions.stop_accepting_requests.active",
+                             Eq(1));
+  codec_client_ = makeHttpConnection(makeClientConnection(lookupPort("http")));
+  auto response = codec_client_->makeHeaderOnlyRequest(default_request_headers_);
+  ASSERT_TRUE(response->waitForEndStream());
+  EXPECT_EQ("503", response->headers().getStatusValue());
+  codec_client_->close();
+
+  // Rejected configuration preserves the last accepted threshold.
+  auto invalid = overload_manager_config_;
+  invalid.mutable_actions(0)->mutable_triggers(0)->set_name("unknown");
+  publish(invalid, "2");
+  test_server_->waitForCounter("overload_manager.xds.update_rejected", Ge(1));
+  EXPECT_EQ(1, test_server_->gauge("overload.envoy.overload_actions.stop_accepting_requests.active")
+                   ->value());
+
+  overload_manager_config_.mutable_actions(0)->mutable_triggers(0)->mutable_threshold()->set_value(
+      0.9);
+  publish(overload_manager_config_, "3");
+  test_server_->waitForGauge("overload.envoy.overload_actions.stop_accepting_requests.active",
+                             Eq(0));
+  codec_client_ = makeHttpConnection(makeClientConnection(lookupPort("http")));
+  response =
+      sendRequestAndWaitForResponse(default_request_headers_, 0, default_response_headers_, 0);
+  EXPECT_EQ("200", response->headers().getStatusValue());
+}
+
 TEST_P(OverloadIntegrationTest, CloseStreamsWhenOverloaded) {
   initializeOverloadManager(
       TestUtility::parseYaml<envoy::config::overload::v3::OverloadAction>(R"EOF(

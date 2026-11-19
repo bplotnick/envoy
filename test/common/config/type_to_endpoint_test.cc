@@ -1,4 +1,5 @@
 #include "envoy/api/v2/rds.pb.h"
+#include "envoy/service/overload/v3/odds.pb.h"
 #include "envoy/service/route/v3/rds.pb.h"
 
 #include "source/common/config/type_to_endpoint.h"
@@ -31,6 +32,18 @@ TEST(TypeToEndpoint, All) {
   // REST endpoints.
   EXPECT_EQ("envoy.service.route.v3.RouteDiscoveryService.FetchRoutes",
             restMethod("type.googleapis.com/envoy.config.route.v3.RouteConfiguration").full_name());
+}
+
+TEST(TypeToEndpoint, OverloadDiscovery) {
+  envoy::service::overload::v3::OddsDummy dummy [[maybe_unused]];
+  constexpr absl::string_view type_url =
+      "type.googleapis.com/envoy.config.overload.v3.OverloadManager";
+  EXPECT_EQ("envoy.service.overload.v3.OverloadDiscoveryService.DeltaOverload",
+            deltaGrpcMethod(type_url).full_name());
+  EXPECT_EQ("envoy.service.overload.v3.OverloadDiscoveryService.StreamOverload",
+            sotwGrpcMethod(type_url).full_name());
+  EXPECT_EQ("envoy.service.overload.v3.OverloadDiscoveryService.FetchOverload",
+            restMethod(type_url).full_name());
 }
 
 } // namespace

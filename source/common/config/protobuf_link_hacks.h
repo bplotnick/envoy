@@ -7,6 +7,7 @@
 #include "envoy/service/extension/v3/config_discovery.pb.h"
 #include "envoy/service/health/v3/hds.pb.h"
 #include "envoy/service/listener/v3/lds.pb.h"
+#include "envoy/service/overload/v3/odds.pb.h"
 #include "envoy/service/ratelimit/v3/rls.pb.h"
 #include "envoy/service/route/v3/rds.pb.h"
 #include "envoy/service/route/v3/srds.pb.h"
@@ -22,6 +23,7 @@ const envoy::service::ratelimit::v3::RateLimitRequest _rls_dummy_v3;
 const envoy::service::secret::v3::SdsDummy _sds_dummy_v3;
 const envoy::service::runtime::v3::RtdsDummy _tds_dummy_v3;
 const envoy::service::listener::v3::LdsDummy _lds_dummy_v3;
+const envoy::service::overload::v3::OddsDummy _odds_dummy_v3;
 const envoy::service::route::v3::RdsDummy _rds_dummy_v3;
 const envoy::service::cluster::v3::CdsDummy _cds_dummy_v3;
 const envoy::service::endpoint::v3::EdsDummy _eds_dummy_v3;
